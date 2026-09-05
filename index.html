@@ -478,8 +478,19 @@ const FIREBASE_CONFIG = {
 
 let firestoreDb = null;
 let firebaseAuth = null;
+// True when this device is *supposed* to be running in Firebase mode
+// (a real config is filled in) but the Firebase SDK itself failed to
+// load or initialize — almost always because the <script> tags that
+// fetch it from gstatic.com couldn't reach the network (no internet at
+// that exact moment, or opened via file:// with a blocked connection).
+// This must NEVER be treated as "switch to local/legacy mode" — on a
+// brand-new device that looks exactly like "zero accounts exist" and
+// forces a confusing "create a new admin from scratch" screen, even
+// though the real shared data is sitting safely in Firestore untouched.
+let firebaseUnreachable = false;
+const firebaseConfigIsReal = FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('ضع-');
 try{
-  if (FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith('ضع-') && window.firebase) {
+  if (firebaseConfigIsReal && window.firebase) {
     firebase.initializeApp(FIREBASE_CONFIG);
     firestoreDb = firebase.firestore();
     firebaseAuth = firebase.auth();
@@ -495,8 +506,14 @@ try{
     // returns — no action needed from the user.
     firestoreDb.enablePersistence({ synchronizeTabs: true })
       .catch(e => console.warn('تعذّر تفعيل وضع الأوفلاين الكامل (المتصفح لا يدعمه أو فيه أكثر من تبويب مفتوح)', e));
+  } else if (firebaseConfigIsReal && !window.firebase) {
+    firebaseUnreachable = true;
   }
-}catch(e){ console.error('تعذّر الاتصال بـ Firebase', e); firestoreDb = null; firebaseAuth = null; }
+}catch(e){
+  console.error('تعذّر الاتصال بـ Firebase', e);
+  firestoreDb = null; firebaseAuth = null;
+  if (firebaseConfigIsReal) firebaseUnreachable = true;
+}
 
 /* Turns a (possibly Arabic) username into a deterministic, valid-looking
    email address so it can be used with Firebase Authentication, which
@@ -541,11 +558,23 @@ function mapAuthError(e){
    2) window.storage (shared) — works when running as a Claude artifact
    3) localStorage — always kept as an extra local backup copy, and used
       directly if Firestore isn't configured/available at all. */
+// Generic timeout wrapper: if a Firestore call doesn't resolve within
+// `ms` (e.g. fully offline with no warmed-up local cache yet, where the
+// SDK can sit waiting for a server response instead of rejecting), race
+// it against a timeout so the app falls back to cached/local data
+// instead of hanging on a blank loading screen forever.
+function withTimeout(promise, ms){
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
 const storageAdapter = {
   async get(key){
     if (firestoreDb) {
       try{
-        const doc = await firestoreDb.collection('quran_app').doc(key).get();
+        const doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get(), 5000);
         if(doc.exists){
           try{ localStorage.setItem(key, doc.data().value); }catch(e){}
           return { value: doc.data().value };
@@ -684,11 +713,21 @@ let accountsLoadFailed = false; // true if a Firestore accounts read errored (e.
 
 async function loadAccountsFromFirestore(){
   try{
-    const snap = await firestoreDb.collection('users').get();
+    const snap = await withTimeout(firestoreDb.collection('users').get(), 5000);
     state.accounts = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
     accountsLoadFailed = false;
+    try{ localStorage.setItem('cached_accounts', JSON.stringify(state.accounts)); }catch(e){}
   }catch(e){
-    console.warn('تعذّر تحميل قائمة الحسابات', e);
+    console.warn('تعذّر تحميل قائمة الحسابات من الخادم — استخدام آخر نسخة محفوظة محلياً', e);
+    // Offline (or a slow connection) with the local Firestore cache not
+    // warmed up yet: fall back to our own localStorage snapshot of the
+    // accounts list from the last time this succeeded, instead of
+    // leaving state.accounts empty — which would otherwise wrongly look
+    // like "no accounts exist" and could show the wrong screen.
+    try{
+      const cached = localStorage.getItem('cached_accounts');
+      if(cached) state.accounts = JSON.parse(cached);
+    }catch(e2){}
     accountsLoadFailed = true;
   }
 }
@@ -3811,22 +3850,39 @@ if (firebaseAuth){
   firebaseAuth.onAuthStateChanged(async (user)=>{
     if (user){
       try{
-        const timeout = new Promise((_,reject)=> setTimeout(()=> reject(new Error('timeout')), 8000));
-        const doc = await Promise.race([
-          firestoreDb.collection('users').doc(user.uid).get(),
-          timeout
-        ]);
+        const doc = await withTimeout(firestoreDb.collection('users').doc(user.uid).get(), 5000);
         if (doc.exists && !doc.data().disabled){
           state.currentUser = doc.data().username;
           state.currentRole = doc.data().role || 'examiner';
           state.currentTeacherLink = doc.data().teacherLink || null;
           state.currentUid = user.uid;
+          try{
+            localStorage.setItem('cached_profile_' + user.uid, JSON.stringify({
+              username: state.currentUser, role: state.currentRole, teacherLink: state.currentTeacherLink,
+            }));
+          }catch(e){}
         } else {
           await firebaseAuth.signOut();
           state.currentUser = null; state.currentRole = null; state.currentUid = null; state.currentTeacherLink = null; state.currentLocalId = null;
         }
       }catch(e){
-        console.warn('تعذّر تحميل بيانات الحساب', e);
+        console.warn('تعذّر تحميل بيانات الحساب من الخادم — استخدام آخر نسخة محفوظة محلياً', e);
+        // Fully offline with no warmed-up Firestore cache yet: restore
+        // the session from our own localStorage snapshot of this same
+        // profile, saved the last time the read above succeeded. This
+        // is what lets someone who logged in once (while online) keep
+        // landing straight on their own page every time they reopen the
+        // app with no internet at all, instead of a stuck loading screen.
+        try{
+          const cached = localStorage.getItem('cached_profile_' + user.uid);
+          if(cached){
+            const profile = JSON.parse(cached);
+            state.currentUser = profile.username;
+            state.currentRole = profile.role;
+            state.currentTeacherLink = profile.teacherLink;
+            state.currentUid = user.uid;
+          }
+        }catch(e2){}
       }
     } else {
       state.currentUser = null; state.currentRole = null; state.currentUid = null; state.currentTeacherLink = null; state.currentLocalId = null;
