@@ -2397,6 +2397,51 @@ function loadLogoImage(){
   return _logoImgPromise;
 }
 
+function drawWatermarkPattern(ctx, W, H){
+  ctx.save();
+  ctx.globalAlpha = 0.05;
+  ctx.fillStyle = PAL.gold;
+  const step = 62;
+  for(let y = step/2; y < H; y += step){
+    const row = Math.round(y/step);
+    const offsetX = (row % 2) * (step/2);
+    for(let x = step/2 + offsetX; x < W; x += step){
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.PI/4);
+      ctx.fillRect(-4.5, -4.5, 9, 9);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+function drawCornerOrnament(ctx, x, y, size, color, flipX, flipY){
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = size*0.055; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(0, size*0.62);
+  ctx.quadraticCurveTo(size*0.12, size*0.18, size*0.62, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(size*0.14, size*0.42);
+  ctx.quadraticCurveTo(size*0.24, size*0.24, size*0.42, size*0.14);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(size*0.64, size*0.02, size*0.05, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(size*0.02, size*0.64, size*0.05, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawCornerOrnaments(ctx, W, H){
+  drawCornerOrnament(ctx, 96, H-96, 46, PAL.gold, false, false);
+  drawCornerOrnament(ctx, W-96, H-96, 46, PAL.gold, true, false);
+  drawCornerOrnament(ctx, 258, 208, 40, PAL.goldLight, false, true);
+  drawCornerOrnament(ctx, W-258, 208, 40, PAL.goldLight, true, true);
+}
+
 function drawHeader(ctx, W, H, brandY, includeSwoosh){
   drawFrame(ctx, W, H);
   if(includeSwoosh !== false) drawBottomSwoosh(ctx, W, H);
@@ -2460,12 +2505,18 @@ async function drawCertificate(record){
   const ctx = canvas.getContext('2d');
 
   ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
+  drawWatermarkPattern(ctx, W, H);
 
   drawHeader(ctx, W, H, 235, false);
+  drawCornerOrnaments(ctx, W, H);
 
   ctx.direction = 'rtl'; ctx.textAlign = 'center';
 
-  ctx.fillStyle = PAL.gold;
+  const titleGrad = ctx.createLinearGradient(W/2-300, 300, W/2+300, 380);
+  titleGrad.addColorStop(0, PAL.gold);
+  titleGrad.addColorStop(0.5, PAL.goldLight);
+  titleGrad.addColorStop(1, PAL.gold);
+  ctx.fillStyle = titleGrad;
   ctx.font = "700 70px 'Amiri', serif";
   ctx.fillText('شهادة اجتياز', W/2, 345);
   drawFlourish(ctx, W/2-260, 335, 16, PAL.gold);
@@ -2495,6 +2546,8 @@ async function drawCertificate(record){
   ctx.fillText(record.studentName, W/2, 495);
   ctx.strokeStyle = PAL.goldLight; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(W/2-310,517); ctx.lineTo(W/2+310,517); ctx.stroke();
+  drawFlourish(ctx, W/2-310, 517, 9, PAL.gold);
+  drawFlourish(ctx, W/2+310, 517, 9, PAL.gold);
 
   ctx.fillStyle = PAL.ink;
   ctx.font = "500 28px 'Tajawal'";
@@ -2507,7 +2560,11 @@ async function drawCertificate(record){
   ctx.fillText('بتقدير', W/2, 685);
 
   const grade = gradeLabel(record.score);
-  ctx.fillStyle = PAL.green;
+  const gradeGrad = ctx.createLinearGradient(W/2-160, 700, W/2+160, 745);
+  gradeGrad.addColorStop(0, PAL.green2);
+  gradeGrad.addColorStop(0.5, PAL.green);
+  gradeGrad.addColorStop(1, PAL.green2);
+  ctx.fillStyle = gradeGrad;
   ctx.font = "700 60px 'Amiri', serif";
   ctx.fillText(grade, W/2, 745);
   const gw = ctx.measureText(grade).width;
@@ -2518,6 +2575,17 @@ async function drawCertificate(record){
   ctx.font = "500 23px 'Tajawal'";
   ctx.fillText('نسأل الله تعالى أن يبارك له في حفظه،', W/2, 805);
   ctx.fillText('وأن يجعله من أهل القرآن وخاصته.', W/2, 835);
+
+  // Official seal + certificate serial number, placed in the open area
+  // to the right of the grade/dua block where nothing else sits.
+  ctx.save();
+  ctx.translate(W-220, 758);
+  ctx.rotate(-10 * Math.PI/180);
+  drawSealStamp(ctx, 0, 0, 50);
+  ctx.restore();
+  ctx.textAlign = 'center';
+  ctx.font = "500 13px 'Tajawal'"; ctx.fillStyle = PAL.inkSoft;
+  ctx.fillText(certificateNumber(record), W-220, 862);
 
   // Bottom info: one single row — تاريخ الإصدار، المحفّظ، مدير المركز،
   // المختبِر — evenly spread across the width using the side margins.
