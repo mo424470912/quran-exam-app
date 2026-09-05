@@ -3845,7 +3845,36 @@ if (firebaseAuth){
     firstAuthCheck = false;
     await loadAppData();
   };
-  setTimeout(()=>{ finishFirstCheck(); }, 6000);
+
+  // If the device has no internet right at startup, don't wait on
+  // Firebase's own session check at all — restore straight from our
+  // own local cache of the last successful login on this device.
+  // Firebase's offline behavior for a brand-new page load isn't fast
+  // or reliable enough to depend on here; this sidesteps it entirely,
+  // and is what makes "log in once, then always land on your own page
+  // even with zero connectivity afterward" actually work.
+  let restoredFromOfflineCache = false;
+  function tryRestoreOfflineSession(){
+    if (firstCheckDone || navigator.onLine) return false;
+    try{
+      const uid = localStorage.getItem('last_session_uid');
+      if(!uid) return false;
+      const cached = localStorage.getItem('cached_profile_' + uid);
+      if(!cached) return false;
+      const profile = JSON.parse(cached);
+      state.currentUser = profile.username;
+      state.currentRole = profile.role;
+      state.currentTeacherLink = profile.teacherLink;
+      state.currentUid = uid;
+      restoredFromOfflineCache = true;
+      finishFirstCheck();
+      return true;
+    }catch(e){ return false; }
+  }
+
+  if (!tryRestoreOfflineSession()){
+    setTimeout(()=>{ finishFirstCheck(); }, 6000);
+  }
 
   firebaseAuth.onAuthStateChanged(async (user)=>{
     if (user){
@@ -3860,10 +3889,12 @@ if (firebaseAuth){
             localStorage.setItem('cached_profile_' + user.uid, JSON.stringify({
               username: state.currentUser, role: state.currentRole, teacherLink: state.currentTeacherLink,
             }));
+            localStorage.setItem('last_session_uid', user.uid);
           }catch(e){}
         } else {
           await firebaseAuth.signOut();
           state.currentUser = null; state.currentRole = null; state.currentUid = null; state.currentTeacherLink = null; state.currentLocalId = null;
+          try{ localStorage.removeItem('last_session_uid'); }catch(e){}
         }
       }catch(e){
         console.warn('تعذّر تحميل بيانات الحساب من الخادم — استخدام آخر نسخة محفوظة محلياً', e);
@@ -3884,8 +3915,16 @@ if (firebaseAuth){
           }
         }catch(e2){}
       }
+      restoredFromOfflineCache = false;
+    } else if (restoredFromOfflineCache && !navigator.onLine){
+      // Firebase is reporting no session, but we're still offline and
+      // already showing a session we restored from our own cache above
+      // — Firebase's own offline determination right after a cold page
+      // load isn't reliable enough to act on here, so keep what we've
+      // got instead of bouncing the person back to the login screen.
     } else {
       state.currentUser = null; state.currentRole = null; state.currentUid = null; state.currentTeacherLink = null; state.currentLocalId = null;
+      try{ localStorage.removeItem('last_session_uid'); }catch(e){}
     }
     if (!firstCheckDone){
       await finishFirstCheck();
