@@ -1667,7 +1667,6 @@ function testScoringView(){
   <div class="scoring-head">
     <button class="link-btn" id="btn-back-setup">‹ رجوع</button>
     <div class="scoring-meta">المحفّظ: <b>${escapeHtml(testForm.teacherName)}</b> · ${escapeHtml(formatJuzRange(testForm.juz))}</div>
-    ${testForm.notes ? `<div class="scoring-meta">ملاحظات: <b>${escapeHtml(testForm.notes)}</b></div>` : ''}
   </div>
 
   <div class="score-panel">
@@ -1698,6 +1697,11 @@ function testScoringView(){
 
   <div class="undo-row">
     <button class="link-btn" id="btn-undo" ${testForm.clicks.length===0?'disabled style="opacity:.4;cursor:default;"':''}>تراجع عن آخر خصم</button>
+  </div>
+
+  <div class="field" style="margin-top:4px;">
+    <label>ملاحظات المختبِر (أثناء الاختبار)</label>
+    <textarea id="f-scoring-notes" placeholder="اكتب ملاحظاتك عن أداء الطالب أثناء الاختبار..." rows="3" style="width:100%;resize:vertical;font-family:inherit;">${escapeHtml(testForm.notes||'')}</textarea>
   </div>
 
   <button class="btn btn-primary" id="btn-save">حفظ نتيجة الاختبار</button>
@@ -1765,6 +1769,9 @@ function attachTestSetupHandlers(){
 }
 
 function attachTestScoringHandlers(){
+  const notesEl = document.getElementById('f-scoring-notes');
+  if(notesEl) notesEl.oninput = ()=> testForm.notes = notesEl.value;
+
   document.querySelectorAll('.deduct-btn').forEach(b=>{
     b.onclick = ()=>{
       testForm.clicks.push({ type: b.dataset.type, value: parseFloat(b.dataset.val) });
