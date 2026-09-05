@@ -1549,9 +1549,10 @@ let testForm = {
   clicks: [], // stack of {type, value}
   questionsDone: [false,false,false,false,false],
   stage: 'setup', // setup | scoring
+  startedAt: null, // timestamp when scoring began — powers the live exam timer
 };
 function resetTestForm(){
-  testForm = { studentName:'', teacherName:'', juz:'1', juzMode:'single', notes:'', clicks:[], questionsDone:[false,false,false,false,false], stage:'setup' };
+  testForm = { studentName:'', teacherName:'', juz:'1', juzMode:'single', notes:'', clicks:[], questionsDone:[false,false,false,false,false], stage:'setup', startedAt:null };
 }
 function currentScore(){
   const total = testForm.clicks.reduce((s,c)=> s + c.value, 0);
@@ -1559,6 +1560,35 @@ function currentScore(){
 }
 function countOf(type){
   return testForm.clicks.filter(c=>c.type===type).length;
+}
+function elapsedExamSeconds(){
+  return testForm.startedAt ? Math.max(0, Math.floor((Date.now() - testForm.startedAt)/1000)) : 0;
+}
+function formatDuration(totalSeconds){
+  const m = Math.floor(totalSeconds/60), s = totalSeconds%60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+/* Draft autosave — protects against losing an in-progress exam if the
+   device closes/refreshes/loses power mid-scoring. Saved on-device
+   only (each examiner's own draft, not synced), and offered back the
+   next time the test setup page loads. */
+function saveDraft(){
+  if(testForm.stage !== 'scoring') return;
+  try{ localStorage.setItem('exam_draft', JSON.stringify(testForm)); }catch(e){}
+}
+function clearDraft(){
+  try{ localStorage.removeItem('exam_draft'); }catch(e){}
+}
+let draftDismissed = false;
+function getSavedDraft(){
+  try{
+    const raw = localStorage.getItem('exam_draft');
+    if(!raw) return null;
+    const d = JSON.parse(raw);
+    if(d && d.stage==='scoring' && d.studentName) return d;
+    return null;
+  }catch(e){ return null; }
 }
 
 const TEACHERS = [
@@ -1610,8 +1640,20 @@ function studentHistoryPanelHTML(name){
 
 function testSetupView(){
   const historyHTML = studentHistoryPanelHTML(testForm.studentName);
+  const draft = !draftDismissed ? getSavedDraft() : null;
   return `
   <div class="section-title">بدء اختبار جديد</div>
+
+  ${draft ? `
+  <div style="background:var(--gold-soft, #F4E6C4); border:1px solid var(--gold, #C08A28); border-radius:10px; padding:12px 14px; margin-bottom:16px;">
+    <div style="font-size:13px; font-weight:700; margin-bottom:4px;">في اختبار لسا ما خلص</div>
+    <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:10px;">للطالب <b>${escapeHtml(draft.studentName)}</b> — بدك تكمله من وين وقف؟</div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" id="btn-resume-draft" style="flex:1; padding:9px;">متابعة الاختبار</button>
+      <button class="btn" id="btn-dismiss-draft" style="flex:1; padding:9px; background:#FCFAF3; border:1px solid var(--line);">تجاهل</button>
+    </div>
+  </div>
+  ` : ''}
 
   <div class="field">
     <label>اسم الطالب</label>
@@ -1667,6 +1709,7 @@ function testScoringView(){
   <div class="scoring-head">
     <button class="link-btn" id="btn-back-setup">‹ رجوع</button>
     <div class="scoring-meta">المحفّظ: <b>${escapeHtml(testForm.teacherName)}</b> · ${escapeHtml(formatJuzRange(testForm.juz))}</div>
+    <div class="scoring-meta">⏱ مدة الاختبار: <b id="exam-timer">${formatDuration(elapsedExamSeconds())}</b></div>
   </div>
 
   <div class="score-panel">
@@ -1715,6 +1758,18 @@ function attachTestHandlers(){
 }
 
 function attachTestSetupHandlers(){
+  const resumeBtn = document.getElementById('btn-resume-draft');
+  if(resumeBtn) resumeBtn.onclick = ()=>{
+    const draft = getSavedDraft();
+    if(draft){ testForm = draft; render(); }
+  };
+  const dismissBtn = document.getElementById('btn-dismiss-draft');
+  if(dismissBtn) dismissBtn.onclick = ()=>{
+    clearDraft();
+    draftDismissed = true;
+    render();
+  };
+
   const sEl = document.getElementById('f-student');
   const tEl = document.getElementById('f-teacher');
   const jEl = document.getElementById('f-juz');
@@ -1764,17 +1819,31 @@ function attachTestSetupHandlers(){
     testForm.clicks = [];
     testForm.questionsDone = [false,false,false,false,false];
     testForm.stage = 'scoring';
+    testForm.startedAt = Date.now();
+    saveDraft();
     render();
   };
 }
 
+let examTimerInterval = null;
 function attachTestScoringHandlers(){
+  if(examTimerInterval){ clearInterval(examTimerInterval); examTimerInterval = null; }
+  const timerEl = document.getElementById('exam-timer');
+  if(timerEl){
+    examTimerInterval = setInterval(()=>{
+      const el = document.getElementById('exam-timer');
+      if(!el){ clearInterval(examTimerInterval); examTimerInterval = null; return; }
+      el.textContent = formatDuration(elapsedExamSeconds());
+    }, 1000);
+  }
+
   const notesEl = document.getElementById('f-scoring-notes');
-  if(notesEl) notesEl.oninput = ()=> testForm.notes = notesEl.value;
+  if(notesEl) notesEl.oninput = ()=>{ testForm.notes = notesEl.value; saveDraft(); };
 
   document.querySelectorAll('.deduct-btn').forEach(b=>{
     b.onclick = ()=>{
       testForm.clicks.push({ type: b.dataset.type, value: parseFloat(b.dataset.val) });
+      saveDraft();
       rerenderTestOnly();
     };
   });
@@ -1784,6 +1853,7 @@ function attachTestScoringHandlers(){
       const i = Number(b.dataset.i);
       if(!testForm.questionsDone) testForm.questionsDone = [false,false,false,false,false];
       testForm.questionsDone[i] = !testForm.questionsDone[i];
+      saveDraft();
       rerenderTestOnly();
     };
   });
@@ -1791,12 +1861,14 @@ function attachTestScoringHandlers(){
   const undoBtn = document.getElementById('btn-undo');
   if(undoBtn) undoBtn.onclick = ()=>{
     testForm.clicks.pop();
+    saveDraft();
     rerenderTestOnly();
   };
 
   const backBtn = document.getElementById('btn-back-setup');
   if(backBtn) backBtn.onclick = ()=>{
     if(testForm.clicks.length && !confirm('الرجوع رح يفقد الخصومات المسجّلة لهاد الاختبار، متأكد؟')) return;
+    clearDraft();
     testForm.stage = 'setup';
     testForm.clicks = [];
     render();
@@ -1815,12 +1887,15 @@ function attachTestScoringHandlers(){
       deductions: { lahn: countOf('lahn'), khataa: countOf('khataa'), tanbih: countOf('tanbih') },
       score: currentScore(),
       stoppedEarly: true,
+      durationSeconds: elapsedExamSeconds(),
       date: new Date().toISOString(),
     };
     state.exams.unshift(record);
     upsertStudentFromExam(record);
     await saveExams();
     await saveStudents();
+    clearDraft();
+    if(examTimerInterval){ clearInterval(examTimerInterval); examTimerInterval = null; }
     showToast('تم إيقاف الاختبار وتسجيل النتيجة — الطالب بحاجة لإعادة الاختبار');
     resetTestForm();
     render();
@@ -1840,12 +1915,15 @@ function attachTestScoringHandlers(){
         tanbih: countOf('tanbih'),
       },
       score: currentScore(),
+      durationSeconds: elapsedExamSeconds(),
       date: new Date().toISOString(),
     };
     state.exams.unshift(record);
     upsertStudentFromExam(record);
     await saveExams();
     await saveStudents();
+    clearDraft();
+    if(examTimerInterval){ clearInterval(examTimerInterval); examTimerInterval = null; }
     showToast('تم حفظ نتيجة الاختبار بنجاح');
     resetTestForm();
     render();
@@ -1963,7 +2041,7 @@ function renderRecords(list, totalCount){
         <button class="teacher-edit-save" data-id="${r.id}" style="font-size:11px;padding:2px 8px;">حفظ</button>
         <button class="teacher-edit-cancel" style="font-size:11px;padding:2px 8px;">إلغاء</button>
         ` : `المحفّظ: <b>${escapeHtml(r.teacherName)}</b>`} · الأجزاء المختبَر فيها: <b>${escapeHtml(String(r.juz))}</b><br>
-        المختبِر: <b>${escapeHtml(r.testerName)}</b> · التاريخ: <b>${dateStr}</b><br>
+        المختبِر: <b>${escapeHtml(r.testerName)}</b> · التاريخ: <b>${dateStr}</b>${r.durationSeconds ? ` · المدة: <b>${formatDuration(r.durationSeconds)}</b>` : ''}<br>
         لحن جلي: <b>${r.deductions.lahn}</b> · خطأ: <b>${r.deductions.khataa}</b> · تنبيه: <b>${r.deductions.tanbih}</b>
         ${r.notes ? `<br>ملاحظات: <b>${escapeHtml(r.notes)}</b>` : ''}
       </div>
@@ -3229,6 +3307,24 @@ function studentDetailView(){
 
   <button class="btn-report" id="btn-progress-cert" style="width:100%; margin-bottom:14px;">${iconReport()} شهادة تقدّم قابلة للمشاركة</button>
 
+  ${(()=>{
+    const certExams = exams.filter(e => !e.stoppedEarly && e.score >= 80);
+    if(!certExams.length) return '';
+    return `
+    <div class="settings-block">
+      <h3>أرشيف شهادات ${escapeHtml(student.name)}</h3>
+      <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">كل شهادات اجتياز الطالب عبر الوقت (${certExams.length})، بترتيب الأحدث أولاً.</p>
+      ${certExams.map(e=>{
+        const d = new Date(e.date).toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
+        return `
+        <div class="backup-row">
+          <span style="font-size:12.5px;">${escapeHtml(formatJuzRange(e.juz))} · ${d}<br><span style="font-size:11px;color:var(--ink-soft);">الدرجة: ${e.score} — ${gradeLabel(e.score)}</span></span>
+          <button class="cert-archive-download" data-id="${e.id}">${iconShare()} تحميل</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  })()}
+
   <div class="field">
     <label>رقم الهاتف (اختياري)</label>
     <input type="text" id="student-phone" placeholder="رقم هاتف ولي الأمر (مع رمز الدولة)" value="${escapeHtml(student.phone||'')}">
@@ -3279,6 +3375,13 @@ function attachStudentDetailHandlers(){
     selectedStudentId = null;
     render();
   };
+
+  document.querySelectorAll('.cert-archive-download').forEach(b=>{
+    b.onclick = ()=>{
+      const record = state.exams.find(e => e.id===b.dataset.id);
+      if(record) shareCertificate(record, b);
+    };
+  });
 
   document.querySelectorAll('.juz-progress-check').forEach(cb=>{
     cb.onchange = ()=> cb.closest('.juz-progress-item').classList.toggle('done', cb.checked);
