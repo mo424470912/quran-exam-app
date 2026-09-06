@@ -18,6 +18,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --bg: #F7F1E4;
@@ -269,7 +270,7 @@ body{
 .record-share svg{ width:14px; height:14px; }
 .record-share:disabled{ opacity:0.5; cursor:default; }
 .empty-state{ text-align:center; color:var(--ink-soft); padding:40px 20px; font-size:14px; }
-.history-toolbar{ display:flex; gap:10px; margin-bottom:16px; }
+.history-toolbar{ display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
 .btn-report{
   flex:1; background:var(--gold); color:#fff; border:none; border-radius:10px;
   padding:11px 14px; font-family:'Tajawal'; font-weight:700; font-size:13.5px; cursor:pointer;
@@ -2069,6 +2070,8 @@ function historyView(){
   </div>
   <div class="history-toolbar">
     <button class="btn-report" id="btn-monthly-report">${iconReport()} تقرير شهري</button>
+    <button class="btn-report" id="btn-daily-png">${iconShare()} نتائج اليوم PNG</button>
+    <button class="btn-report" id="btn-daily-pdf">${iconShare()} نتائج اليوم PDF</button>
   </div>
   <div class="search-box">
     <input type="text" id="search-input" placeholder="ابحث عن طالب..." value="${escapeHtml(historySearch)}">
@@ -2200,6 +2203,12 @@ function attachHistoryHandlers(){
 
   const reportBtn = document.getElementById('btn-monthly-report');
   if(reportBtn) reportBtn.onclick = ()=> generateMonthlyReport(reportBtn);
+
+  const dailyPngBtn = document.getElementById('btn-daily-png');
+  if(dailyPngBtn) dailyPngBtn.onclick = ()=> exportDailyResults(dailyPngBtn);
+
+  const dailyPdfBtn = document.getElementById('btn-daily-pdf');
+  if(dailyPdfBtn) dailyPdfBtn.onclick = ()=> exportDailyResultsPDF(dailyPdfBtn);
 }
 
 function attachDeleteHandlers(){
@@ -2262,7 +2271,7 @@ function attachTeacherEditHandlers(){
    certificate template (arch frame, hanging lanterns, logo,
    pill badges, seal stamp, table).
    ============================================================ */
-const PAL = { green:'#1B4332', green2:'#0F2E22', gold:'#C08A28', goldLight:'#D9B15C', cream:'#FCF8EC', ink:'#26231C', inkSoft:'#6B6355' };
+const PAL = { green:'#1B4332', green2:'#0F2E22', gold:'#C08A28', goldLight:'#D9B15C', cream:'#FCF8EC', ink:'#26231C', inkSoft:'#6B6355', red:'#C0392B' };
 
 function buildArchPath(ctx, W, H, margin, shoulderY, stepW, apexY){
   ctx.beginPath();
@@ -2931,7 +2940,7 @@ async function drawMonthlyReport(period){
   const periodLabel = period==='year'
     ? now.toLocaleDateString('ar-EG', {year:'numeric'})
     : now.toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
-  const periodExams = state.exams.filter(e=>{
+  const periodExams = visibleExams().filter(e=>{
     const d = new Date(e.date);
     if(period==='year') return d.getFullYear()===now.getFullYear();
     return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
@@ -3107,6 +3116,209 @@ async function generateMonthlyReport(btnEl, period){
     if(e && e.name !== 'AbortError'){
       console.error(e);
       showToast('تعذّر إصدار التقرير، حاول مرة ثانية');
+    }
+  }finally{
+    if(btnEl) btnEl.disabled = false;
+  }
+}
+
+/* Today's exam results, as a single shareable image (PNG) — one row
+   per exam taken today, colored red when the result is a fail/retake,
+   so an examiner can send the day's results in one message right after
+   finishing testing, without opening Excel. */
+async function drawDailyResultsImage(){
+  await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
+  await loadLogoImage();
+  const today = todayStamp();
+  const todayExams = visibleExams()
+    .filter(e => e.date.slice(0,10) === today)
+    .sort((a,b)=> new Date(a.date) - new Date(b.date));
+
+  const dateLabel = new Date().toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
+  const passCount = todayExams.filter(e => !e.stoppedEarly && e.score>=80).length;
+  const failCount = todayExams.length - passCount;
+  const avgAll = todayExams.length ? Math.round(todayExams.reduce((s,e)=>s+e.score,0)/todayExams.length) : 0;
+
+  const W = 1500;
+  const rowH = 58;
+  const tableTop = 615;
+  const maxRows = 20;
+  const shownRows = todayExams.slice(0, maxRows);
+  const extra = todayExams.length - shownRows.length;
+  const H = tableTop + 60 + Math.max(shownRows.length,1)*rowH + (extra>0?36:0) + 170;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
+  drawHeader(ctx, W, H, 225);
+
+  ctx.direction = 'rtl'; ctx.textAlign = 'center';
+  ctx.fillStyle = PAL.green;
+  ctx.font = "700 46px 'Amiri', serif";
+  ctx.fillText('نتائج اختبارات اليوم', W/2, 335);
+  drawFlourish(ctx, W/2-220, 325, 14, PAL.gold);
+  drawFlourish(ctx, W/2+220, 325, 14, PAL.gold);
+
+  drawPillBadge(ctx, W/2, 385, dateLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
+
+  const cardW = 380, cardH = 108, gap = 30, cardY = 435;
+  const totalW = cardW*3 + gap*2;
+  const startX = (W-totalW)/2;
+  const cardsData = [
+    { val: todayExams.length, lbl: 'إجمالي الاختبارات', icon:'clip' },
+    { val: passCount, lbl: 'ناجح', icon:'star' },
+    { val: failCount, lbl: 'إعادة', icon:'people' },
+  ];
+  cardsData.forEach((c,i)=>{
+    const x = startX + i*(cardW+gap);
+    ctx.beginPath();
+    ctx.moveTo(x+14,cardY); ctx.lineTo(x+cardW-14,cardY);
+    ctx.arcTo(x+cardW,cardY,x+cardW,cardY+14,14);
+    ctx.lineTo(x+cardW,cardY+cardH-14); ctx.arcTo(x+cardW,cardY+cardH,x+cardW-14,cardY+cardH,14);
+    ctx.lineTo(x+14,cardY+cardH); ctx.arcTo(x,cardY+cardH,x,cardY+cardH-14,14);
+    ctx.lineTo(x,cardY+14); ctx.arcTo(x,cardY,x+14,cardY,14);
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
+    ctx.fillText(String(c.val), x+cardW/2-25, cardY+cardH/2+2);
+    ctx.fillStyle = PAL.inkSoft; ctx.font = "600 16px 'Tajawal'";
+    ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
+  });
+
+  const tX = startX, tW = totalW;
+  const colWidths = { name:0.30, teacher:0.26, juz:0.24, score:0.20 };
+  const cols = [
+    { key:'name', label:'اسم الطالب', w: tW*colWidths.name },
+    { key:'teacher', label:'المحفّظ', w: tW*colWidths.teacher },
+    { key:'juz', label:'الجزء', w: tW*colWidths.juz },
+    { key:'score', label:'العلامة', w: tW*colWidths.score },
+  ];
+  let cx = tX + tW;
+  ctx.font = "700 19px 'Tajawal'";
+  cols.forEach(col=>{
+    const x0 = cx - col.w;
+    ctx.fillStyle = PAL.green; ctx.fillRect(x0, tableTop, col.w, 54);
+    ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(x0, tableTop, col.w, 54);
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.fillText(col.label, x0+col.w/2, tableTop+34);
+    col._x0 = x0;
+    cx = x0;
+  });
+
+  ctx.font = "500 18px 'Tajawal'";
+  if(shownRows.length===0){
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(tX, tableTop+54, tW, rowH);
+    ctx.fillStyle = PAL.inkSoft; ctx.textAlign = 'center';
+    ctx.fillText('ما في اختبارات مسجّلة اليوم', tX+tW/2, tableTop+54+rowH/2+6);
+  }
+  shownRows.forEach((e,i)=>{
+    const y = tableTop + 54 + i*rowH;
+    const isFail = e.stoppedEarly || e.score < 80;
+    ctx.fillStyle = isFail ? '#FBE7E5' : (i%2===0 ? '#FFFFFF' : '#FAF4E4');
+    ctx.fillRect(tX, y, tW, rowH);
+    const scoreText = e.stoppedEarly ? 'إعادة' : String(e.score);
+    const values = { name:e.studentName, teacher:e.teacherName, juz:formatJuzRange(e.juz), score:scoreText };
+    ctx.fillStyle = isFail ? PAL.red : PAL.ink;
+    cols.forEach(col=>{
+      ctx.textAlign = 'center';
+      ctx.font = col.key==='score' ? "700 19px 'Tajawal'" : "500 18px 'Tajawal'";
+      ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6);
+    });
+  });
+  ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(tX, tableTop, tW, 54 + Math.max(shownRows.length,1)*rowH);
+
+  let afterTableY = tableTop + 54 + Math.max(shownRows.length,1)*rowH + 34;
+  if(extra>0){
+    ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
+    ctx.fillText(`و ${extra} اختبار آخر...`, W/2, afterTableY);
+    afterTableY += 34;
+  }
+  ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
+  ctx.fillText(`متوسط علامات اليوم: ${avgAll}`, W/2, afterTableY + 14);
+
+  return { canvas, todayExams };
+}
+
+async function exportDailyResults(btnEl){
+  if(btnEl) btnEl.disabled = true;
+  try{
+    const { canvas, todayExams } = await drawDailyResultsImage();
+    if(todayExams.length === 0){
+      showToast('لا توجد اختبارات مسجّلة اليوم بعد');
+      return;
+    }
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    const today = todayStamp();
+    const fileName = `نتائج-اليوم-${today}.png`;
+    const file = new File([blob], fileName, { type:'image/png' });
+    const title = 'نتائج اختبارات اليوم';
+
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title, text: title + ' — مركز السيد هاشم' });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast('تم حفظ نتائج اليوم كصورة');
+    }
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      console.error(e);
+      showToast('تعذّر إصدار النتائج، حاول مرة ثانية');
+    }
+  }finally{
+    if(btnEl) btnEl.disabled = false;
+  }
+}
+
+/* Same daily results report, exported as a one-page PDF instead of a
+   PNG — some people prefer sending/printing a PDF. Reuses the exact
+   same canvas drawing; only the export format differs. */
+async function exportDailyResultsPDF(btnEl){
+  if(btnEl) btnEl.disabled = true;
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
+      return;
+    }
+    const { canvas, todayExams } = await drawDailyResultsImage();
+    if(todayExams.length === 0){
+      showToast('لا توجد اختبارات مسجّلة اليوم بعد');
+      return;
+    }
+    const imgData = canvas.toDataURL('image/png');
+    const { jsPDF } = window.jspdf;
+    const orientation = canvas.width >= canvas.height ? 'l' : 'p';
+    const pdf = new jsPDF({ orientation, unit:'pt', format:[canvas.width, canvas.height] });
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    const today = todayStamp();
+    const fileName = `نتائج-اليوم-${today}.pdf`;
+    const blob = pdf.output('blob');
+    const file = new File([blob], fileName, { type:'application/pdf' });
+    const title = 'نتائج اختبارات اليوم';
+
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title, text: title + ' — مركز السيد هاشم' });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast('تم حفظ نتائج اليوم كملف PDF');
+    }
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      console.error(e);
+      showToast('تعذّر إصدار ملف PDF، حاول مرة ثانية');
     }
   }finally{
     if(btnEl) btnEl.disabled = false;
