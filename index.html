@@ -376,6 +376,7 @@ const STORAGE_EXAMS = 'exams';
 const STORAGE_STUDENTS = 'students';
 const STORAGE_SCHEDULE = 'schedule';
 const STORAGE_NOTIFICATIONS = 'notifications';
+const STORAGE_MEMORIZATION = 'memorization';
 
 /* Dark mode: applied immediately (before first render) so there's no
    flash of the light theme, and remembered per-device via localStorage. */
@@ -626,6 +627,7 @@ let state = {
   students: [],
   schedule: [], // upcoming exam appointments: {id, studentName, teacherName, date, note, done}
   notifications: [], // {id, message, teacherName (null = all teachers), from, createdAt, readBy: [usernames]}
+  memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo, quality, note, date, recordedBy}
   authMode: 'login', // login | register
 };
 
@@ -660,6 +662,10 @@ async function loadAppData(){
     const nt = await storageAdapter.get(STORAGE_NOTIFICATIONS);
     state.notifications = nt ? JSON.parse(nt.value) : [];
   }catch(e){ state.notifications = []; }
+  try{
+    const mz = await storageAdapter.get(STORAGE_MEMORIZATION);
+    state.memorization = mz ? JSON.parse(mz.value) : [];
+  }catch(e){ state.memorization = []; }
 
   if (firebaseAuth && firestoreDb){
     await loadAccountsFromFirestore();
@@ -753,6 +759,10 @@ async function saveSchedule(){
 async function saveNotifications(){
   await storageAdapter.set(STORAGE_NOTIFICATIONS, JSON.stringify(state.notifications));
 }
+async function saveMemorization(){
+  await storageAdapter.set(STORAGE_MEMORIZATION, JSON.stringify(state.memorization));
+  maybeAutoBackup();
+}
 
 /* ---------------- DATA EXPORT / IMPORT / BACKUP ---------------- */
 function todayStamp(){ return new Date().toISOString().slice(0,10); }
@@ -767,7 +777,7 @@ function downloadBlob(content, filename, mime){
 }
 
 function exportDataJSON(){
-  const payload = { exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule };
+  const payload = { exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization };
   downloadBlob(JSON.stringify(payload, null, 2), `بيانات-${todayStamp()}.json`, 'application/json');
   showToast('تم تصدير البيانات (JSON)');
 }
@@ -921,6 +931,7 @@ async function importDataFromFile(file){
     }
     const importedExams = Array.isArray(data.exams) ? data.exams : [];
     const importedStudents = Array.isArray(data.students) ? data.students : [];
+    const importedMemorization = Array.isArray(data.memorization) ? data.memorization : [];
 
     let addedExams = 0;
     importedExams.forEach(e=>{
@@ -947,9 +958,17 @@ async function importDataFromFile(file){
     });
 
     state.exams.sort((a,b)=> new Date(b.date) - new Date(a.date));
+
+    let addedMemorization = 0;
+    importedMemorization.forEach(m=>{
+      if(m && m.id && !state.memorization.some(x=>x.id===m.id)){ state.memorization.push(m); addedMemorization++; }
+    });
+    state.memorization.sort((a,b)=> new Date(b.date) - new Date(a.date));
+
     await saveExams();
     await saveStudents();
-    showToast(`تم الاستيراد: ${addedExams} اختبار جديد، ${addedStudents} طالب جديد، ${mergedStudents} طالب محدَّث`);
+    await saveMemorization();
+    showToast(`تم الاستيراد: ${addedExams} اختبار جديد، ${addedStudents} طالب جديد، ${mergedStudents} طالب محدَّث، ${addedMemorization} حصة تحفيظ جديدة`);
     render();
   }catch(e){
     console.error(e);
@@ -963,7 +982,7 @@ function maybeAutoBackup(){
   try{
     const todayKey = 'auto_backup_' + todayStamp();
     if(!localStorage.getItem(todayKey)){
-      localStorage.setItem(todayKey, JSON.stringify({ exams: state.exams, students: state.students, schedule: state.schedule, savedAt: new Date().toISOString() }));
+      localStorage.setItem(todayKey, JSON.stringify({ exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization, savedAt: new Date().toISOString() }));
       const keys = Object.keys(localStorage).filter(k=>k.startsWith('auto_backup_')).sort();
       while(keys.length > 10){ localStorage.removeItem(keys.shift()); }
     }
@@ -980,9 +999,11 @@ async function restoreBackup(key){
     state.exams = data.exams || [];
     state.students = data.students || [];
     state.schedule = data.schedule || [];
+    state.memorization = data.memorization || [];
     await saveExams();
     await saveStudents();
     await saveSchedule();
+    await saveMemorization();
     showToast('تم استرجاع النسخة الاحتياطية');
     render();
   }catch(e){ showToast('تعذّر استرجاع النسخة الاحتياطية'); }
@@ -996,7 +1017,7 @@ function createManualBackup(label){
   try{
     const key = 'manual_backup_' + Date.now();
     const payload = {
-      exams: state.exams, students: state.students, schedule: state.schedule,
+      exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization,
       savedAt: new Date().toISOString(),
       label: (label && label.trim()) || ('نسخة بتاريخ ' + new Date().toLocaleString('ar-EG', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })),
     };
@@ -1018,7 +1039,7 @@ function updateManualBackup(key){
     let old = null;
     try{ old = JSON.parse(localStorage.getItem(key)); }catch(e){}
     const payload = {
-      exams: state.exams, students: state.students, schedule: state.schedule,
+      exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization,
       savedAt: new Date().toISOString(),
       label: (old && old.label) || 'نسخة محدّثة',
     };
@@ -1048,6 +1069,72 @@ function upsertStudentFromExam(record){
       if(n>=1 && n<=30 && !student.juzProgress.includes(n)) student.juzProgress.push(n);
     });
   }
+}
+
+const MUSHAF_TOTAL_PAGES = 604;
+
+/* Finds (or creates) a student profile by name from a logged
+   memorization session — mirrors upsertStudentFromExam, so a teacher
+   logging a session for a brand-new name creates the student record
+   automatically (this is how "teachers add their own students" works
+   without a separate add-student form). */
+function upsertStudentFromMemorization(record){
+  const key = record.studentName.trim();
+  let student = state.students.find(s => s.name.trim().toLowerCase() === key.toLowerCase());
+  if(!student){
+    student = { id: 'st_' + Date.now(), name: key, phone: '', notes: '', juzProgress: [], createdAt: new Date().toISOString() };
+    state.students.push(student);
+  }
+  return student;
+}
+
+/* Builds a 604-page memorization map for a student from their logged
+   sessions: 'none' (never logged), 'fresh' (memorized and reviewed
+   within the last 30 days), 'stale' (memorized but not reviewed
+   recently — a hint the teacher should schedule a review). */
+function getStudentPageMap(studentName){
+  const key = studentName.trim().toLowerCase();
+  const sessions = state.memorization.filter(m => m.studentName.trim().toLowerCase() === key);
+  const map = new Array(MUSHAF_TOTAL_PAGES + 1).fill(null); // 1-indexed
+  sessions.forEach(m=>{
+    const from = Math.min(m.pageFrom, m.pageTo), to = Math.max(m.pageFrom, m.pageTo);
+    for(let p=from; p<=to; p++){
+      if(p<1 || p>MUSHAF_TOTAL_PAGES) continue;
+      const entry = map[p] || { memorized:false, lastDate:null };
+      if(m.type==='new') entry.memorized = true;
+      if(!entry.lastDate || new Date(m.date) > new Date(entry.lastDate)) entry.lastDate = m.date;
+      map[p] = entry;
+    }
+  });
+  const now = Date.now();
+  return map.map((entry, page)=>{
+    if(page===0) return null;
+    if(!entry || !entry.memorized) return { page, status:'none' };
+    const daysSince = (now - new Date(entry.lastDate).getTime()) / 86400000;
+    return { page, status: daysSince<=30 ? 'fresh' : 'stale', lastDate: entry.lastDate };
+  });
+}
+
+/* Distinct pages newly memorized within a given "YYYY-MM" month, for
+   one student (teacherName optional — pass it to scope the count to
+   sessions logged by that specific teacher). */
+function getMonthlyNewPageCount(studentName, yearMonth, teacherName){
+  const key = studentName.trim().toLowerCase();
+  const pages = new Set();
+  state.memorization.forEach(m=>{
+    if(m.studentName.trim().toLowerCase() !== key) return;
+    if(m.type !== 'new') return;
+    if(teacherName && m.teacherName !== teacherName) return;
+    if(!m.date.startsWith(yearMonth)) return;
+    const from = Math.min(m.pageFrom, m.pageTo), to = Math.max(m.pageFrom, m.pageTo);
+    for(let p=from; p<=to; p++) pages.add(p);
+  });
+  return pages.size;
+}
+
+function currentYearMonth(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
 }
 
 /* ---------------- RENDER ROOT ---------------- */
@@ -1448,6 +1535,7 @@ function iconTest(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="curren
 function iconHistory(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 106 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>`; }
 function iconSettings(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`; }
 function iconStats(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg>`; }
+function iconBook(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>`; }
 function iconStudents(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="3.2"/><path d="M2.5 20c0-3.6 2.9-6.4 6.5-6.4s6.5 2.8 6.5 6.4"/><circle cx="17.5" cy="8" r="2.4"/><path d="M15.5 13.6c2.9.4 4.9 2.7 5 6.4"/></svg>`; }
 function iconStarSvg(){ return `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 7.1-1.01z"/></svg>`; }
 function iconTeacherIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>`; }
@@ -1457,7 +1545,7 @@ function iconWhatsappSvg(){ return `<svg viewBox="0 0 24 24" fill="currentColor"
 
 function effectiveView(){
   const isTeacherRole = state.currentRole === 'teacher';
-  return isTeacherRole && !['schedule','history','settings'].includes(state.view) ? 'schedule' : state.view;
+  return isTeacherRole && !['schedule','history','memorization','settings'].includes(state.view) ? 'schedule' : state.view;
 }
 
 function mainScreen(){
@@ -1471,6 +1559,7 @@ function mainScreen(){
     : currentView==='stats' ? statsView
     : currentView==='students' ? studentsView
     : currentView==='schedule' ? teacherBookingView
+    : currentView==='memorization' ? memorizationView
     : settingsView;
   return `
   <div class="topbar">
@@ -1486,6 +1575,7 @@ function mainScreen(){
   <div class="tabbar">
     ${isTeacherRole ? `
     <button class="tab-btn ${currentView==='schedule'?'active':''}" data-view="schedule">${iconTest()}<span>حجز اختبار</span></button>
+    <button class="tab-btn ${currentView==='memorization'?'active':''}" data-view="memorization">${iconBook()}<span>التحفيظ</span></button>
     <button class="tab-btn ${currentView==='history'?'active':''}" data-view="history">${iconHistory()}<span>نتائج طلابي</span></button>
     <button class="tab-btn ${currentView==='settings'?'active':''}" data-view="settings">${iconSettings()}<span>الإعدادات</span></button>
     ` : `
@@ -1540,6 +1630,7 @@ function attachMainHandlers(){
   if(currentView==='stats') attachStatsHandlers();
   if(currentView==='students') attachStudentsHandlers();
   if(currentView==='schedule') attachScheduleHandlers();
+  if(currentView==='memorization') attachMemorizationHandlers();
   if(currentView==='settings') attachSettingsHandlers();
 }
 
@@ -2397,6 +2488,51 @@ function loadLogoImage(){
   return _logoImgPromise;
 }
 
+function drawWatermarkPattern(ctx, W, H){
+  ctx.save();
+  ctx.globalAlpha = 0.05;
+  ctx.fillStyle = PAL.gold;
+  const step = 62;
+  for(let y = step/2; y < H; y += step){
+    const row = Math.round(y/step);
+    const offsetX = (row % 2) * (step/2);
+    for(let x = step/2 + offsetX; x < W; x += step){
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.PI/4);
+      ctx.fillRect(-4.5, -4.5, 9, 9);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+function drawCornerOrnament(ctx, x, y, size, color, flipX, flipY){
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = size*0.055; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(0, size*0.62);
+  ctx.quadraticCurveTo(size*0.12, size*0.18, size*0.62, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(size*0.14, size*0.42);
+  ctx.quadraticCurveTo(size*0.24, size*0.24, size*0.42, size*0.14);
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(size*0.64, size*0.02, size*0.05, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(size*0.02, size*0.64, size*0.05, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawCornerOrnaments(ctx, W, H){
+  drawCornerOrnament(ctx, 96, H-96, 46, PAL.gold, false, false);
+  drawCornerOrnament(ctx, W-96, H-96, 46, PAL.gold, true, false);
+  drawCornerOrnament(ctx, 258, 208, 40, PAL.goldLight, false, true);
+  drawCornerOrnament(ctx, W-258, 208, 40, PAL.goldLight, true, true);
+}
+
 function drawHeader(ctx, W, H, brandY, includeSwoosh){
   drawFrame(ctx, W, H);
   if(includeSwoosh !== false) drawBottomSwoosh(ctx, W, H);
@@ -2460,12 +2596,18 @@ async function drawCertificate(record){
   const ctx = canvas.getContext('2d');
 
   ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
+  drawWatermarkPattern(ctx, W, H);
 
   drawHeader(ctx, W, H, 235, false);
+  drawCornerOrnaments(ctx, W, H);
 
   ctx.direction = 'rtl'; ctx.textAlign = 'center';
 
-  ctx.fillStyle = PAL.gold;
+  const titleGrad = ctx.createLinearGradient(W/2-300, 300, W/2+300, 380);
+  titleGrad.addColorStop(0, PAL.gold);
+  titleGrad.addColorStop(0.5, PAL.goldLight);
+  titleGrad.addColorStop(1, PAL.gold);
+  ctx.fillStyle = titleGrad;
   ctx.font = "700 70px 'Amiri', serif";
   ctx.fillText('شهادة اجتياز', W/2, 345);
   drawFlourish(ctx, W/2-260, 335, 16, PAL.gold);
@@ -2495,6 +2637,8 @@ async function drawCertificate(record){
   ctx.fillText(record.studentName, W/2, 495);
   ctx.strokeStyle = PAL.goldLight; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(W/2-310,517); ctx.lineTo(W/2+310,517); ctx.stroke();
+  drawFlourish(ctx, W/2-310, 517, 9, PAL.gold);
+  drawFlourish(ctx, W/2+310, 517, 9, PAL.gold);
 
   ctx.fillStyle = PAL.ink;
   ctx.font = "500 28px 'Tajawal'";
@@ -2507,7 +2651,11 @@ async function drawCertificate(record){
   ctx.fillText('بتقدير', W/2, 685);
 
   const grade = gradeLabel(record.score);
-  ctx.fillStyle = PAL.green;
+  const gradeGrad = ctx.createLinearGradient(W/2-160, 700, W/2+160, 745);
+  gradeGrad.addColorStop(0, PAL.green2);
+  gradeGrad.addColorStop(0.5, PAL.green);
+  gradeGrad.addColorStop(1, PAL.green2);
+  ctx.fillStyle = gradeGrad;
   ctx.font = "700 60px 'Amiri', serif";
   ctx.fillText(grade, W/2, 745);
   const gw = ctx.measureText(grade).width;
@@ -2518,6 +2666,17 @@ async function drawCertificate(record){
   ctx.font = "500 23px 'Tajawal'";
   ctx.fillText('نسأل الله تعالى أن يبارك له في حفظه،', W/2, 805);
   ctx.fillText('وأن يجعله من أهل القرآن وخاصته.', W/2, 835);
+
+  // Official seal + certificate serial number, placed in the open area
+  // to the right of the grade/dua block where nothing else sits.
+  ctx.save();
+  ctx.translate(W-220, 758);
+  ctx.rotate(-10 * Math.PI/180);
+  drawSealStamp(ctx, 0, 0, 50);
+  ctx.restore();
+  ctx.textAlign = 'center';
+  ctx.font = "500 13px 'Tajawal'"; ctx.fillStyle = PAL.inkSoft;
+  ctx.fillText(certificateNumber(record), W-220, 862);
 
   // Bottom info: one single row — تاريخ الإصدار، المحفّظ، مدير المركز،
   // المختبِر — evenly spread across the width using the side margins.
@@ -3008,6 +3167,26 @@ function statsView(){
     </div>
   </div>
 
+  ${(()=>{
+    if(!state.memorization.length) return '';
+    const ym = currentYearMonth();
+    const perTeacher = {};
+    [...new Set(state.memorization.map(m=>m.teacherName))].forEach(t=>{
+      const studentsOfTeacher = [...new Set(state.memorization.filter(m=>m.teacherName===t).map(m=>m.studentName))];
+      perTeacher[t] = studentsOfTeacher.reduce((sum,name)=> sum + getMonthlyNewPageCount(name, ym, t), 0);
+    });
+    const rows = Object.entries(perTeacher).sort((a,b)=>b[1]-a[1]).filter(([,pages])=>pages>0);
+    if(!rows.length) return '';
+    return `
+    <div class="settings-block" style="margin-top:22px;">
+      <h3>التحفيظ الشهري حسب المحفّظ</h3>
+      <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">مجموع الصفحات الجديدة يلي سجّلها كل محفّظ هالشهر</p>
+      ${rows.map(([teacher, pages])=>`
+        <div class="backup-row"><span style="font-size:13px;">${escapeHtml(teacher)}</span><span style="font-weight:700; color:var(--green);">${pages} صفحة</span></div>
+      `).join('')}
+    </div>`;
+  })()}
+
   <div class="section-title" style="margin-top:22px;">التقارير</div>
   <div class="history-toolbar">
     <button class="btn-report" id="btn-monthly-report-stats">${iconReport()} تقرير شهري</button>
@@ -3226,6 +3405,123 @@ function attachScheduleHandlers(){
   });
 }
 
+/* ---------------- MEMORIZATION (تحفيظ) VIEW — teacher-only ---------------- */
+function memorizationView(){
+  const myTeacherName = state.currentTeacherLink;
+  const ym = currentYearMonth();
+  const mySessions = state.memorization
+    .filter(m => m.teacherName === myTeacherName)
+    .sort((a,b)=> new Date(b.date) - new Date(a.date));
+  const myStudentNames = [...new Set(mySessions.map(m=>m.studentName))];
+  const monthlyTotal = myStudentNames.reduce((sum, name)=> sum + getMonthlyNewPageCount(name, ym, myTeacherName), 0);
+
+  return `
+  <div class="section-title">تسجيل التحفيظ</div>
+
+  <div class="settings-block" style="margin-bottom:16px;">
+    <h3>ملخص الشهر الحالي</h3>
+    <p style="font-size:13px; color:var(--ink-soft);">مجموع الصفحات الجديدة يلي سجّلتها لكل طلابك هالشهر: <b style="color:var(--green); font-size:16px;">${monthlyTotal}</b> صفحة</p>
+  </div>
+
+  <div class="field">
+    <label>اسم الطالب</label>
+    <input type="text" id="mz-student" list="student-list-mz" placeholder="اسم الطالب">
+    <datalist id="student-list-mz">${studentSuggestions()}</datalist>
+  </div>
+  <div class="field">
+    <label>نوع الحصة</label>
+    <select id="mz-type">
+      <option value="new">حفظ جديد</option>
+      <option value="review">مراجعة</option>
+    </select>
+  </div>
+  <div style="display:flex; gap:10px;">
+    <div class="field" style="flex:1;">
+      <label>من صفحة</label>
+      <input type="number" id="mz-from" min="1" max="${MUSHAF_TOTAL_PAGES}" placeholder="1">
+    </div>
+    <div class="field" style="flex:1;">
+      <label>إلى صفحة</label>
+      <input type="number" id="mz-to" min="1" max="${MUSHAF_TOTAL_PAGES}" placeholder="1">
+    </div>
+  </div>
+  <div class="field">
+    <label>مستوى التسميع</label>
+    <select id="mz-quality">
+      <option value="متقن">متقن</option>
+      <option value="متوسط">متوسط</option>
+      <option value="ضعيف">ضعيف</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>ملاحظة (اختياري)</label>
+    <textarea id="mz-note" placeholder="ملاحظة عن الحصة..." rows="2" style="width:100%; resize:vertical; font-family:inherit;"></textarea>
+  </div>
+  <div id="mz-error" style="font-size:12px; color:var(--red); margin-bottom:8px;"></div>
+  <button class="btn btn-primary" id="btn-save-memorization" style="margin-bottom:20px;">حفظ الحصة</button>
+
+  <div class="section-title">آخر الحصص المسجّلة</div>
+  ${mySessions.length===0 ? `<div class="empty-state">ما في حصص مسجّلة بعد</div>` : mySessions.slice(0,25).map(m=>{
+    const d = new Date(m.date).toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
+    const typeLabel = m.type==='new' ? 'حفظ جديد' : 'مراجعة';
+    return `
+    <div class="record">
+      <div class="record-top">
+        <div class="name">${escapeHtml(m.studentName)}</div>
+        <div class="record-score ${m.type==='new' ? 'score-high':'score-mid'}">${typeLabel}</div>
+      </div>
+      <div class="record-meta">
+        من صفحة <b>${m.pageFrom}</b> إلى صفحة <b>${m.pageTo}</b> · التسميع: <b>${escapeHtml(m.quality)}</b> · التاريخ: <b>${d}</b>
+        ${m.note ? `<br>ملاحظة: <b>${escapeHtml(m.note)}</b>` : ''}
+      </div>
+      <button class="link-btn mz-del" data-id="${m.id}" style="color:var(--red); font-size:12px; margin-top:4px;">حذف</button>
+    </div>`;
+  }).join('')}
+  `;
+}
+
+function attachMemorizationHandlers(){
+  const saveBtn = document.getElementById('btn-save-memorization');
+  if(saveBtn) saveBtn.onclick = async ()=>{
+    const errEl = document.getElementById('mz-error');
+    if(errEl) errEl.textContent = '';
+    const studentName = document.getElementById('mz-student').value.trim();
+    const type = document.getElementById('mz-type').value;
+    const pageFrom = parseInt(document.getElementById('mz-from').value, 10);
+    const pageTo = parseInt(document.getElementById('mz-to').value, 10);
+    const quality = document.getElementById('mz-quality').value;
+    const note = document.getElementById('mz-note').value.trim();
+
+    if(!studentName){ if(errEl) errEl.textContent='اكتب اسم الطالب'; return; }
+    if(!pageFrom || !pageTo || pageFrom<1 || pageTo<1 || pageFrom>MUSHAF_TOTAL_PAGES || pageTo>MUSHAF_TOTAL_PAGES){
+      if(errEl) errEl.textContent = `اكتب أرقام صفحات صحيحة (بين 1 و ${MUSHAF_TOTAL_PAGES})`; return;
+    }
+
+    const record = {
+      id: 'mz_' + Date.now(),
+      studentName, teacherName: state.currentTeacherLink,
+      type, pageFrom, pageTo, quality, note,
+      date: new Date().toISOString(),
+      recordedBy: state.currentUser,
+    };
+    state.memorization.unshift(record);
+    upsertStudentFromMemorization(record);
+    await saveMemorization();
+    await saveStudents();
+    showToast('تم حفظ الحصة بنجاح');
+    render();
+  };
+
+  document.querySelectorAll('.mz-del').forEach(b=>{
+    b.onclick = async ()=>{
+      if(!confirm('حذف هذه الحصة؟')) return;
+      state.memorization = state.memorization.filter(m => m.id!==b.dataset.id);
+      await saveMemorization();
+      render();
+    };
+  });
+}
+
 function renderStudentCards(list){
   if(list.length===0){
     return `<div class="empty-state">${studentSearch ? 'ما في نتائج مطابقة' : 'ما في طلاب مسجّلين بعد — بينضاف الطالب أوتوماتيك أول ما تختبره'}</div>`;
@@ -3346,6 +3642,46 @@ function studentDetailView(){
       }).join('')}
     </div>
   </div>
+
+  ${(()=>{
+    const pageMap = getStudentPageMap(student.name);
+    const memorizedCount = pageMap.filter(p=>p && p.status!=='none').length;
+    const staleCount = pageMap.filter(p=>p && p.status==='stale').length;
+    const ym = currentYearMonth();
+    const monthlyPages = getMonthlyNewPageCount(student.name, ym);
+    const mySessions = state.memorization
+      .filter(m => m.studentName.trim().toLowerCase()===student.name.trim().toLowerCase())
+      .sort((a,b)=> new Date(b.date) - new Date(a.date));
+    if(!mySessions.length) return '';
+    return `
+    <div class="settings-block">
+      <h3>خارطة حفظ الصفحات (${memorizedCount}/${MUSHAF_TOTAL_PAGES})</h3>
+      <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">
+        هالشهر: <b style="color:var(--green);">${monthlyPages}</b> صفحة جديدة
+        ${staleCount ? ` · <b style="color:var(--amber);">${staleCount}</b> صفحة محتاجة مراجعة (ما تراجعت من أكتر من شهر)` : ''}
+      </p>
+      <div style="display:grid; grid-template-columns:repeat(20, 1fr); gap:2px;">
+        ${pageMap.slice(1).map(p=>{
+          const color = p.status==='fresh' ? 'var(--green)' : p.status==='stale' ? 'var(--amber, #C08A28)' : 'var(--line)';
+          return `<div title="صفحة ${p.page}" style="aspect-ratio:1; border-radius:2px; background:${color};"></div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex; gap:14px; margin-top:8px; font-size:11px; color:var(--ink-soft);">
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--green);margin-left:4px;"></span>محفوظة</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--amber,#C08A28);margin-left:4px;"></span>تحتاج مراجعة</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--line);margin-left:4px;"></span>لسا</span>
+      </div>
+    </div>
+
+    <div class="settings-block">
+      <h3>آخر حصص التحفيظ</h3>
+      ${mySessions.slice(0,10).map(m=>{
+        const d = new Date(m.date).toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
+        const typeLabel = m.type==='new' ? 'حفظ جديد' : 'مراجعة';
+        return `<div class="backup-row"><span style="font-size:12.5px;">صفحة ${m.pageFrom}-${m.pageTo} · ${typeLabel} · ${escapeHtml(m.quality)}<br><span style="font-size:11px;color:var(--ink-soft);">${escapeHtml(m.teacherName||'—')} · ${d}</span></span></div>`;
+      }).join('')}
+    </div>`;
+  })()}
 
   <div class="settings-block">
     <h3>خطة الحفظ</h3>
@@ -3911,11 +4247,13 @@ function attachSettingsHandlers(){
     state.schedule = [];
     state.accounts = [];
     state.notifications = [];
+    state.memorization = [];
     await saveExams();
     await saveStudents();
     await saveSchedule();
     await saveAccounts();
     await saveNotifications();
+    await saveMemorization();
     state.currentUser = null;
     state.currentRole = null;
     state.currentTeacherLink = null;
