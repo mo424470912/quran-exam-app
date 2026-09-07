@@ -378,6 +378,7 @@ const STORAGE_STUDENTS = 'students';
 const STORAGE_SCHEDULE = 'schedule';
 const STORAGE_NOTIFICATIONS = 'notifications';
 const STORAGE_MEMORIZATION = 'memorization';
+const STORAGE_IMPORT_BATCHES = 'importBatches';
 
 /* Dark mode: applied immediately (before first render) so there's no
    flash of the light theme, and remembered per-device via localStorage. */
@@ -629,6 +630,7 @@ let state = {
   schedule: [], // upcoming exam appointments: {id, studentName, teacherName, date, note, done}
   notifications: [], // {id, message, teacherName (null = all teachers), from, createdAt, readBy: [usernames]}
   memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo, quality, note, date, recordedBy}
+  importBatches: [], // {id, source:'students-excel', date, importedBy, teacherName, entries:[{studentId, wasNew, prevSnapshot|null}]}
   authMode: 'login', // login | register
 };
 
@@ -667,6 +669,10 @@ async function loadAppData(){
     const mz = await storageAdapter.get(STORAGE_MEMORIZATION);
     state.memorization = mz ? JSON.parse(mz.value) : [];
   }catch(e){ state.memorization = []; }
+  try{
+    const ib = await storageAdapter.get(STORAGE_IMPORT_BATCHES);
+    state.importBatches = ib ? JSON.parse(ib.value) : [];
+  }catch(e){ state.importBatches = []; }
 
   if (firebaseAuth && firestoreDb){
     await loadAccountsFromFirestore();
@@ -763,6 +769,9 @@ async function saveNotifications(){
 async function saveMemorization(){
   await storageAdapter.set(STORAGE_MEMORIZATION, JSON.stringify(state.memorization));
   maybeAutoBackup();
+}
+async function saveImportBatches(){
+  await storageAdapter.set(STORAGE_IMPORT_BATCHES, JSON.stringify(state.importBatches));
 }
 
 /* ---------------- DATA EXPORT / IMPORT / BACKUP ---------------- */
@@ -3483,6 +3492,27 @@ function attachStatsHandlers(){
 /* ---------------- STUDENTS VIEW ---------------- */
 let selectedStudentId = null;
 let studentSearch = '';
+let expandedTeacherGroups = new Set();
+
+/* Best-effort "which teacher does this student belong to" — explicit
+   registration wins, otherwise inferred from whoever has tested or
+   logged memorization sessions for them most. */
+function getStudentTeacherName(student){
+  if(student.registeredByTeacher) return student.registeredByTeacher;
+  const counts = {};
+  state.exams.forEach(e=>{
+    if(e.studentName.trim().toLowerCase()===student.name.trim().toLowerCase() && e.teacherName){
+      counts[e.teacherName] = (counts[e.teacherName]||0) + 1;
+    }
+  });
+  state.memorization.forEach(m=>{
+    if(m.studentName.trim().toLowerCase()===student.name.trim().toLowerCase() && m.teacherName){
+      counts[m.teacherName] = (counts[m.teacherName]||0) + 1;
+    }
+  });
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  return entries.length ? entries[0][0] : null;
+}
 
 function studentsView(){
   return selectedStudentId ? studentDetailView() : studentListView();
@@ -3494,10 +3524,6 @@ function attachStudentsHandlers(){
 }
 
 function studentListView(){
-  const filtered = state.students
-    .filter(s => s.name.toLowerCase().includes(studentSearch.toLowerCase()))
-    .sort((a,b) => a.name.localeCompare(b.name, 'ar'));
-
   return `
   ${scheduleSection()}
   <div class="section-title">الطلاب</div>
@@ -3505,9 +3531,43 @@ function studentListView(){
     <input type="text" id="student-search-input" placeholder="ابحث عن طالب..." value="${escapeHtml(studentSearch)}">
   </div>
   <div id="student-list-wrap">
-    ${renderStudentCards(filtered)}
+    ${renderStudentListWrapHTML()}
   </div>
   `;
+}
+
+function renderStudentListWrapHTML(){
+  if(studentSearch.trim()){
+    const filtered = state.students
+      .filter(s => s.name.toLowerCase().includes(studentSearch.toLowerCase()))
+      .sort((a,b) => a.name.localeCompare(b.name, 'ar'));
+    return renderStudentCards(filtered);
+  }
+
+  // No active search: group students by teacher, collapsed by default,
+  // so the list stays compact instead of one long flat scroll.
+  const groups = {};
+  state.students.forEach(s=>{
+    const teacher = getStudentTeacherName(s) || 'غير محدد';
+    if(!groups[teacher]) groups[teacher] = [];
+    groups[teacher].push(s);
+  });
+  const teacherNames = Object.keys(groups).sort((a,b)=> a.localeCompare(b, 'ar'));
+
+  if(teacherNames.length===0) return `<div class="empty-state">ما في طلاب مسجّلين بعد — بينضاف الطالب أوتوماتيك أول ما تختبره</div>`;
+
+  return teacherNames.map(teacher=>{
+    const students = groups[teacher].sort((a,b)=> a.name.localeCompare(b.name, 'ar'));
+    const expanded = expandedTeacherGroups.has(teacher);
+    return `
+    <div class="settings-block teacher-group" style="padding:0; overflow:hidden;">
+      <button type="button" class="teacher-group-toggle" data-teacher="${escapeHtml(teacher)}" style="width:100%; display:flex; justify-content:space-between; align-items:center; padding:14px 16px; background:none; border:none; cursor:pointer; font-family:'Tajawal';">
+        <span style="font-weight:700; font-size:14.5px; color:var(--ink);">${escapeHtml(teacher)}</span>
+        <span style="font-size:12px; color:var(--ink-soft); display:flex; align-items:center; gap:6px;">${students.length} طالب <span style="transform:rotate(${expanded?90:0}deg); transition:transform .15s; display:inline-block;">›</span></span>
+      </button>
+      ${expanded ? `<div style="padding:0 16px 14px;">${renderStudentCards(students)}</div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 function teacherBookingView(){
@@ -3840,6 +3900,17 @@ function myStudentsView(){
       <button class="ghost" id="btn-import-students-trigger">استيراد ملف Excel</button>
     </div>
     <input type="file" id="import-students-file-input" accept=".xlsx" style="display:none;">
+    ${state.importBatches.filter(b=>b.teacherName===myTeacherName).length ? `
+    <div style="margin-top:14px;">
+      <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">آخر عمليات الاستيراد</div>
+      ${state.importBatches.filter(b=>b.teacherName===myTeacherName).slice(0,8).map(b=>{
+        const d = new Date(b.date).toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
+        return `<div class="backup-row">
+          <span style="font-size:12.5px;">${escapeHtml(b.fileName||'ملف Excel')} — ${b.entries.length} طالب<br><span style="font-size:11px;color:var(--ink-soft);">${d}</span></span>
+          <button class="undo-import-batch" data-id="${b.id}" style="color:var(--red);">تراجع</button>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
   </div>
 
   <div class="settings-block">
@@ -3871,6 +3942,10 @@ function myStudentsView(){
 }
 
 function attachMyStudentsHandlers(){
+  document.querySelectorAll('.undo-import-batch').forEach(b=>{
+    b.onclick = ()=> undoImportBatch(b.dataset.id);
+  });
+
   const searchInput = document.getElementById('my-student-search-input');
   if(searchInput) searchInput.oninput = ()=>{
     myStudentSearch = searchInput.value;
@@ -3993,6 +4068,7 @@ async function importStudentsFromExcel(file){
     await wb.xlsx.load(buf);
     const ws = wb.worksheets[0];
     let added = 0, updated = 0;
+    const batchEntries = [];
     ws.eachRow((row, rowNumber)=>{
       if(rowNumber === 1) return; // header row
       const name = String(row.getCell(1).value || '').trim();
@@ -4008,18 +4084,38 @@ async function importStudentsFromExcel(file){
       const phone = String(row.getCell(4).value || '').trim();
 
       let student = state.students.find(s => s.name.trim().toLowerCase()===name.toLowerCase());
+      let wasNew = false;
+      let prevSnapshot = null;
       if(!student){
         student = { id: 'st_' + Date.now() + '_' + rowNumber, name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
         state.students.push(student);
         added++;
+        wasNew = true;
       } else {
         updated++;
+        prevSnapshot = {
+          nationalId: student.nationalId || '', birthDate: student.birthDate || null,
+          phone: student.phone || '', registeredByTeacher: student.registeredByTeacher || null,
+        };
       }
       student.registeredByTeacher = student.registeredByTeacher || state.currentTeacherLink;
       if(nationalId) student.nationalId = nationalId;
       if(birthDate) student.birthDate = birthDate;
       if(phone) student.phone = phone;
+      batchEntries.push({ studentId: student.id, wasNew, prevSnapshot });
     });
+    if(batchEntries.length){
+      state.importBatches.unshift({
+        id: 'ib_' + Date.now(),
+        source: 'students-excel',
+        date: new Date().toISOString(),
+        importedBy: state.currentUser,
+        teacherName: state.currentTeacherLink,
+        fileName: file.name,
+        entries: batchEntries,
+      });
+      await saveImportBatches();
+    }
     await saveStudents();
     showToast(`تم الاستيراد: ${added} طالب جديد، ${updated} طالب محدَّث`);
     render();
@@ -4027,6 +4123,45 @@ async function importStudentsFromExcel(file){
     console.error(e);
     showToast('تعذّر قراءة الملف — تأكد إنه بنفس صيغة النموذج');
   }
+}
+
+/* Reverts a mistaken import: newly-created students are removed
+   entirely (unless they've since gained real exam/memorization
+   history, in which case only the imported fields are cleared to
+   avoid deleting genuine records); updated students have their prior
+   field values restored exactly as they were before the import. */
+async function undoImportBatch(batchId){
+  const batch = state.importBatches.find(b => b.id===batchId);
+  if(!batch) return;
+  if(!confirm(`متأكد إنك بدك تتراجع عن هذا الاستيراد (${batch.entries.length} طالب)؟`)) return;
+
+  let removed = 0, reverted = 0;
+  batch.entries.forEach(entry=>{
+    const student = state.students.find(s => s.id===entry.studentId);
+    if(!student) return;
+    if(entry.wasNew){
+      const hasHistory = state.exams.some(e=>e.studentName.trim().toLowerCase()===student.name.trim().toLowerCase())
+        || state.memorization.some(m=>m.studentName.trim().toLowerCase()===student.name.trim().toLowerCase());
+      if(!hasHistory){
+        state.students = state.students.filter(s => s.id !== student.id);
+        removed++;
+      } else {
+        student.nationalId = ''; student.birthDate = null; student.phone = ''; student.registeredByTeacher = null;
+        reverted++;
+      }
+    } else if(entry.prevSnapshot){
+      student.nationalId = entry.prevSnapshot.nationalId;
+      student.birthDate = entry.prevSnapshot.birthDate;
+      student.phone = entry.prevSnapshot.phone;
+      student.registeredByTeacher = entry.prevSnapshot.registeredByTeacher;
+      reverted++;
+    }
+  });
+  state.importBatches = state.importBatches.filter(b => b.id !== batchId);
+  await saveStudents();
+  await saveImportBatches();
+  showToast(`تم التراجع: ${removed} طالب محذوف، ${reverted} طالب رجّع لبياناته القديمة`);
+  render();
 }
 
 function renderStudentCards(list){
@@ -4055,14 +4190,26 @@ function attachStudentListHandlers(){
   const input = document.getElementById('student-search-input');
   if(input) input.oninput = ()=>{
     studentSearch = input.value;
-    const filtered = state.students
-      .filter(s => s.name.toLowerCase().includes(studentSearch.toLowerCase()))
-      .sort((a,b) => a.name.localeCompare(b.name, 'ar'));
-    document.getElementById('student-list-wrap').innerHTML = renderStudentCards(filtered);
+    document.getElementById('student-list-wrap').innerHTML = renderStudentListWrapHTML();
     attachStudentCardHandlers();
+    attachTeacherGroupToggleHandlers();
   };
   attachStudentCardHandlers();
+  attachTeacherGroupToggleHandlers();
   attachScheduleHandlers();
+}
+
+function attachTeacherGroupToggleHandlers(){
+  document.querySelectorAll('.teacher-group-toggle').forEach(btn=>{
+    btn.onclick = ()=>{
+      const teacher = btn.dataset.teacher;
+      if(expandedTeacherGroups.has(teacher)) expandedTeacherGroups.delete(teacher);
+      else expandedTeacherGroups.add(teacher);
+      document.getElementById('student-list-wrap').innerHTML = renderStudentListWrapHTML();
+      attachStudentCardHandlers();
+      attachTeacherGroupToggleHandlers();
+    };
+  });
 }
 
 function attachStudentCardHandlers(){
@@ -4766,12 +4913,14 @@ function attachSettingsHandlers(){
     state.accounts = [];
     state.notifications = [];
     state.memorization = [];
+    state.importBatches = [];
     await saveExams();
     await saveStudents();
     await saveSchedule();
     await saveAccounts();
     await saveNotifications();
     await saveMemorization();
+    await saveImportBatches();
     state.currentUser = null;
     state.currentRole = null;
     state.currentTeacherLink = null;
