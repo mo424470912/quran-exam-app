@@ -891,6 +891,8 @@ async function exportDataExcel(){
     const wsStudents = wb.addWorksheet('الطلاب', { views: [{ rightToLeft: true, state: 'frozen', ySplit: 1 }] });
     wsStudents.columns = [
       { header: 'اسم الطالب', key: 'name', width: 24 },
+      { header: 'رقم الهوية', key: 'nationalId', width: 18 },
+      { header: 'تاريخ الميلاد', key: 'birthDate', width: 16 },
       { header: 'رقم الهاتف', key: 'phone', width: 18 },
       { header: 'ملاحظات', key: 'notes', width: 28 },
       { header: 'عدد الأجزاء المكتملة', key: 'done', width: 20 },
@@ -899,7 +901,7 @@ async function exportDataExcel(){
     styleHeaderRow(wsStudents.getRow(1));
     state.students.forEach((s, i)=>{
       const row = wsStudents.addRow({
-        name: s.name, phone: s.phone || '', notes: s.notes || '',
+        name: s.name, nationalId: s.nationalId || '', birthDate: s.birthDate || '', phone: s.phone || '', notes: s.notes || '',
         done: s.juzProgress.length, total: 30,
       });
       bandRow(row, i);
@@ -1546,7 +1548,7 @@ function iconWhatsappSvg(){ return `<svg viewBox="0 0 24 24" fill="currentColor"
 
 function effectiveView(){
   const isTeacherRole = state.currentRole === 'teacher';
-  return isTeacherRole && !['schedule','history','memorization','settings'].includes(state.view) ? 'schedule' : state.view;
+  return isTeacherRole && !['schedule','history','memorization','myStudents','settings'].includes(state.view) ? 'schedule' : state.view;
 }
 
 function mainScreen(){
@@ -1561,6 +1563,7 @@ function mainScreen(){
     : currentView==='students' ? studentsView
     : currentView==='schedule' ? teacherBookingView
     : currentView==='memorization' ? memorizationView
+    : currentView==='myStudents' ? myStudentsView
     : settingsView;
   return `
   <div class="topbar">
@@ -1576,6 +1579,7 @@ function mainScreen(){
   <div class="tabbar">
     ${isTeacherRole ? `
     <button class="tab-btn ${currentView==='schedule'?'active':''}" data-view="schedule">${iconTest()}<span>حجز اختبار</span></button>
+    <button class="tab-btn ${currentView==='myStudents'?'active':''}" data-view="myStudents">${iconStudents()}<span>بيانات الطلاب</span></button>
     <button class="tab-btn ${currentView==='memorization'?'active':''}" data-view="memorization">${iconBook()}<span>التحفيظ</span></button>
     <button class="tab-btn ${currentView==='history'?'active':''}" data-view="history">${iconHistory()}<span>نتائج طلابي</span></button>
     <button class="tab-btn ${currentView==='settings'?'active':''}" data-view="settings">${iconSettings()}<span>الإعدادات</span></button>
@@ -1632,6 +1636,7 @@ function attachMainHandlers(){
   if(currentView==='students') attachStudentsHandlers();
   if(currentView==='schedule') attachScheduleHandlers();
   if(currentView==='memorization') attachMemorizationHandlers();
+  if(currentView==='myStudents') attachMyStudentsHandlers();
   if(currentView==='settings') attachSettingsHandlers();
 }
 
@@ -2417,6 +2422,64 @@ function drawPillBadge(ctx, cx, cy, text, font, padX, bg, fg, h){
   return w;
 }
 
+function drawRibbonBanner(ctx, cx, cy, w, h, text, font, textColor){
+  const tailW = 28;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(cx-w/2-tailW, cy-h/2);
+  ctx.lineTo(cx-w/2, cy-h/2);
+  ctx.lineTo(cx-w/2, cy+h/2);
+  ctx.lineTo(cx-w/2-tailW, cy+h/2);
+  ctx.lineTo(cx-w/2-tailW+13, cy);
+  ctx.closePath();
+  ctx.fillStyle = PAL.green2; ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx+w/2+tailW, cy-h/2);
+  ctx.lineTo(cx+w/2, cy-h/2);
+  ctx.lineTo(cx+w/2, cy+h/2);
+  ctx.lineTo(cx+w/2+tailW, cy+h/2);
+  ctx.lineTo(cx+w/2+tailW-13, cy);
+  ctx.closePath();
+  ctx.fillStyle = PAL.green2; ctx.fill();
+
+  ctx.fillStyle = PAL.green;
+  ctx.fillRect(cx-w/2, cy-h/2, w, h);
+  ctx.strokeStyle = PAL.gold; ctx.lineWidth = 3;
+  ctx.strokeRect(cx-w/2, cy-h/2, w, h);
+  ctx.strokeStyle = PAL.goldLight; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx-w/2+12, cy-h/2+7); ctx.lineTo(cx+w/2-12, cy-h/2+7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx-w/2+12, cy+h/2-7); ctx.lineTo(cx+w/2-12, cy+h/2-7); ctx.stroke();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = textColor || '#fff';
+  ctx.font = font;
+  ctx.fillText(text, cx, cy+3);
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+}
+
+function drawLaurelSpray(ctx, cx, cy, color, side){
+  const leafCount = 5;
+  for(let i=0;i<leafCount;i++){
+    const t = i/(leafCount-1);
+    const angle = (Math.PI/2) + side*(t*0.95);
+    const dist = 12 + t*36;
+    const x = cx + Math.cos(angle)*dist*side;
+    const y = cy - Math.sin(angle)*dist;
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(-angle*side + Math.PI/2);
+    ctx.beginPath();
+    ctx.ellipse(0,0, 5.5, 12.5, 0,0,Math.PI*2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.88 - t*0.18;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+}
+
 function drawSealStamp(ctx, cx, cy, r){
   ctx.save();
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle = PAL.green2; ctx.fill();
@@ -2607,22 +2670,16 @@ async function drawCertificate(record){
   ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
   drawWatermarkPattern(ctx, W, H);
 
-  drawHeader(ctx, W, H, 235, false);
+  drawHeader(ctx, W, H, 210, false);
   drawCornerOrnaments(ctx, W, H);
 
   ctx.direction = 'rtl'; ctx.textAlign = 'center';
 
-  const titleGrad = ctx.createLinearGradient(W/2-300, 300, W/2+300, 380);
-  titleGrad.addColorStop(0, PAL.gold);
-  titleGrad.addColorStop(0.5, PAL.goldLight);
-  titleGrad.addColorStop(1, PAL.gold);
-  ctx.fillStyle = titleGrad;
-  ctx.font = "700 70px 'Amiri', serif";
-  ctx.fillText('شهادة اجتياز', W/2, 345);
-  drawFlourish(ctx, W/2-260, 335, 16, PAL.gold);
-  drawFlourish(ctx, W/2+260, 335, 16, PAL.gold);
-  ctx.strokeStyle = PAL.gold; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(W/2-225,368); ctx.lineTo(W/2+225,368); ctx.stroke();
+  // Title as a ribbon banner instead of plain gradient text — reads as
+  // a proper award ribbon rather than a text heading.
+  drawRibbonBanner(ctx, W/2, 320, 460, 78, 'شهادة اجتياز', "700 44px 'Amiri', serif", '#fff');
+  drawFlourish(ctx, W/2-290, 320, 13, PAL.gold);
+  drawFlourish(ctx, W/2+290, 320, 13, PAL.gold);
 
   // "تشهد إدارة ..." — the word "إدارة" specifically drawn bold, rest at
   // normal weight, reconstructed in correct RTL reading order.
@@ -2635,57 +2692,62 @@ async function drawCertificate(record){
     ctx.font = normalFont; const wAfter = ctx.measureText(after).width;
     let x = W/2 - (wBefore+wBold+wAfter)/2;
     ctx.fillStyle = PAL.ink;
-    ctx.font = normalFont; ctx.fillText(after, x, 425); x += wAfter;
-    ctx.font = boldFont; ctx.fillText(boldWord, x, 425); x += wBold;
-    ctx.font = normalFont; ctx.fillText(before, x, 425);
+    ctx.font = normalFont; ctx.fillText(after, x, 410); x += wAfter;
+    ctx.font = boldFont; ctx.fillText(boldWord, x, 410); x += wBold;
+    ctx.font = normalFont; ctx.fillText(before, x, 410);
     ctx.textAlign = 'center';
   })();
 
-  ctx.fillStyle = PAL.green;
-  ctx.font = "700 58px 'Amiri', serif";
-  ctx.fillText(record.studentName, W/2, 495);
+  // Student name on a soft plaque instead of a bare underline — gives
+  // the name its own visual "frame" the way an award certificate would.
+  const nameFont = "700 56px 'Amiri', serif";
+  ctx.font = nameFont;
+  const nameW = ctx.measureText(record.studentName).width;
+  const plaqueW = Math.max(420, nameW + 140), plaqueH = 84, plaqueY = 445;
+  ctx.fillStyle = '#fff';
   ctx.strokeStyle = PAL.goldLight; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(W/2-310,517); ctx.lineTo(W/2+310,517); ctx.stroke();
-  drawFlourish(ctx, W/2-310, 517, 9, PAL.gold);
-  drawFlourish(ctx, W/2+310, 517, 9, PAL.gold);
+  ctx.beginPath();
+  ctx.moveTo(W/2-plaqueW/2+18, plaqueY);
+  ctx.lineTo(W/2+plaqueW/2-18, plaqueY);
+  ctx.quadraticCurveTo(W/2+plaqueW/2, plaqueY, W/2+plaqueW/2, plaqueY+plaqueH/2);
+  ctx.quadraticCurveTo(W/2+plaqueW/2, plaqueY+plaqueH, W/2+plaqueW/2-18, plaqueY+plaqueH);
+  ctx.lineTo(W/2-plaqueW/2+18, plaqueY+plaqueH);
+  ctx.quadraticCurveTo(W/2-plaqueW/2, plaqueY+plaqueH, W/2-plaqueW/2, plaqueY+plaqueH/2);
+  ctx.quadraticCurveTo(W/2-plaqueW/2, plaqueY, W/2-plaqueW/2+18, plaqueY);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  drawFlourish(ctx, W/2-plaqueW/2-4, plaqueY+plaqueH/2, 8, PAL.gold);
+  drawFlourish(ctx, W/2+plaqueW/2+4, plaqueY+plaqueH/2, 8, PAL.gold);
+  ctx.fillStyle = PAL.green;
+  ctx.font = nameFont;
+  ctx.fillText(record.studentName, W/2, plaqueY+plaqueH/2+18);
 
   ctx.fillStyle = PAL.ink;
-  ctx.font = "500 28px 'Tajawal'";
-  ctx.fillText('قد اجتاز اختبار حفظ وتلاوة', W/2, 565);
+  ctx.font = "500 27px 'Tajawal'";
+  ctx.fillText('قد اجتاز اختبار حفظ وتلاوة', W/2, 578);
 
-  drawPillBadge(ctx, W/2, 618, formatJuzRange(record.juz), "700 27px 'Tajawal'", 34, PAL.green, '#fff', 54);
+  drawPillBadge(ctx, W/2, 630, formatJuzRange(record.juz), "700 26px 'Tajawal'", 34, PAL.green, '#fff', 52);
 
   ctx.fillStyle = PAL.ink;
-  ctx.font = "500 24px 'Tajawal'";
-  ctx.fillText('بتقدير', W/2, 685);
+  ctx.font = "500 23px 'Tajawal'";
+  ctx.fillText('بتقدير', W/2, 695);
 
   const grade = gradeLabel(record.score);
-  const gradeGrad = ctx.createLinearGradient(W/2-160, 700, W/2+160, 745);
+  const gradeGrad = ctx.createLinearGradient(W/2-160, 700, W/2+160, 750);
   gradeGrad.addColorStop(0, PAL.green2);
   gradeGrad.addColorStop(0.5, PAL.green);
   gradeGrad.addColorStop(1, PAL.green2);
   ctx.fillStyle = gradeGrad;
-  ctx.font = "700 60px 'Amiri', serif";
-  ctx.fillText(grade, W/2, 745);
+  ctx.font = "700 58px 'Amiri', serif";
+  ctx.fillText(grade, W/2, 752);
   const gw = ctx.measureText(grade).width;
-  drawFlourish(ctx, W/2-gw/2-30, 725, 12, PAL.gold);
-  drawFlourish(ctx, W/2+gw/2+30, 725, 12, PAL.gold);
+  drawLaurelSpray(ctx, W/2-gw/2-14, 735, PAL.gold, -1);
+  drawLaurelSpray(ctx, W/2+gw/2+14, 735, PAL.gold, 1);
 
   ctx.fillStyle = PAL.ink;
-  ctx.font = "500 23px 'Tajawal'";
-  ctx.fillText('نسأل الله تعالى أن يبارك له في حفظه،', W/2, 805);
-  ctx.fillText('وأن يجعله من أهل القرآن وخاصته.', W/2, 835);
-
-  // Official seal + certificate serial number, placed in the open area
-  // to the right of the grade/dua block where nothing else sits.
-  ctx.save();
-  ctx.translate(W-220, 758);
-  ctx.rotate(-10 * Math.PI/180);
-  drawSealStamp(ctx, 0, 0, 50);
-  ctx.restore();
-  ctx.textAlign = 'center';
-  ctx.font = "500 13px 'Tajawal'"; ctx.fillStyle = PAL.inkSoft;
-  ctx.fillText(certificateNumber(record), W-220, 862);
+  ctx.font = "500 22px 'Tajawal'";
+  ctx.fillText('نسأل الله تعالى أن يبارك له في حفظه،', W/2, 815);
+  ctx.fillText('وأن يجعله من أهل القرآن وخاصته.', W/2, 845);
 
   // Bottom info: one single row — تاريخ الإصدار، المحفّظ، مدير المركز،
   // المختبِر — evenly spread across the width using the side margins.
@@ -3348,8 +3410,12 @@ function statsView(){
   <div class="section-title">الإحصاءات</div>
 
   <div class="stat-row">
+    <div class="stat-card"><div class="num">${state.students.length}</div><div class="lbl">إجمالي الطلاب المسجّلين</div></div>
     <div class="stat-card"><div class="num">${uniqueStudents}</div><div class="lbl">عدد الطلاب المختبَرين</div></div>
+  </div>
+  <div class="stat-row">
     <div class="stat-card"><div class="num">${state.exams.length}</div><div class="lbl">إجمالي الاختبارات</div></div>
+    <div class="stat-card"><div class="num">${state.students.filter(s=>!s.nationalId||!s.birthDate||!s.phone).length}</div><div class="lbl">طلاب بياناتهم ناقصة</div></div>
   </div>
 
   <div class="highlight-card">
@@ -3734,6 +3800,235 @@ function attachMemorizationHandlers(){
   });
 }
 
+/* ---------------- MY STUDENTS (بيانات الطلاب) — teacher-only ---------------- */
+
+/* A student "belongs" to a teacher if the teacher explicitly registered
+   them here, or if they show up in that teacher's exam/memorization
+   history — this way students created earlier (before this feature
+   existed) still show up for the right teacher without manual re-entry. */
+function getTeacherStudentNames(teacherName){
+  const names = new Set();
+  state.students.forEach(s=>{ if(s.registeredByTeacher === teacherName) names.add(s.name.trim().toLowerCase()); });
+  state.exams.forEach(e=>{ if(e.teacherName === teacherName) names.add(e.studentName.trim().toLowerCase()); });
+  state.memorization.forEach(m=>{ if(m.teacherName === teacherName) names.add(m.studentName.trim().toLowerCase()); });
+  return names;
+}
+
+let myStudentSearch = '';
+
+function myStudentsView(){
+  const myTeacherName = state.currentTeacherLink;
+  const nameSet = getTeacherStudentNames(myTeacherName);
+  const myStudents = state.students
+    .filter(s => nameSet.has(s.name.trim().toLowerCase()))
+    .filter(s => s.name.toLowerCase().includes(myStudentSearch.toLowerCase()))
+    .sort((a,b)=> a.name.localeCompare(b.name, 'ar'));
+  const missingCount = myStudents.filter(s=> !s.nationalId || !s.birthDate || !s.phone).length;
+
+  return `
+  <div class="section-title">بيانات الطلاب</div>
+  <div class="stat-row">
+    <div class="stat-card"><div class="num">${myStudents.length}</div><div class="lbl">عدد طلابي</div></div>
+    <div class="stat-card"><div class="num">${missingCount}</div><div class="lbl">بيانات ناقصة</div></div>
+  </div>
+
+  <div class="settings-block">
+    <h3>استيراد من ملف Excel</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">حمّل النموذج، عبّي بيانات طلابك فيه، وارفعه هون — بينضافوا أو يتحدّثوا تلقائياً (مطابقة حسب الاسم).</p>
+    <div class="data-btn-row">
+      <button id="btn-download-template">تحميل نموذج فارغ</button>
+      <button class="ghost" id="btn-import-students-trigger">استيراد ملف Excel</button>
+    </div>
+    <input type="file" id="import-students-file-input" accept=".xlsx" style="display:none;">
+  </div>
+
+  <div class="settings-block">
+    <h3>إضافة طالب جديد</h3>
+    <div class="field"><input type="text" id="new-stu-name" placeholder="اسم الطالب"></div>
+    <div class="field"><input type="text" id="new-stu-id" placeholder="رقم الهوية (اختياري)"></div>
+    <div class="field"><input type="date" id="new-stu-birth" placeholder="تاريخ الميلاد"></div>
+    <div class="field"><input type="text" id="new-stu-phone" placeholder="رقم الجوال (اختياري)"></div>
+    <div id="new-stu-error" style="font-size:12px; color:var(--red); margin-bottom:8px;"></div>
+    <button class="btn btn-primary" id="btn-add-my-student">إضافة الطالب</button>
+  </div>
+
+  <div class="search-box">
+    <input type="text" id="my-student-search-input" placeholder="ابحث عن طالب..." value="${escapeHtml(myStudentSearch)}">
+  </div>
+  <div id="my-students-list">
+    ${myStudents.length===0 ? `<div class="empty-state">${myStudentSearch ? 'ما في نتائج مطابقة' : 'ما في طلاب مسجّلين إلك بعد'}</div>` : myStudents.map(s=>`
+    <div class="acct-row-expanded">
+      <div class="acct-row-top"><span>${escapeHtml(s.name)}</span></div>
+      <div class="acct-manage-row" style="flex-wrap:wrap;">
+        <input type="text" class="mystu-id" data-id="${s.id}" placeholder="رقم الهوية" value="${escapeHtml(s.nationalId||'')}" style="flex:1;min-width:110px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:'Tajawal';">
+        <input type="date" class="mystu-birth" data-id="${s.id}" value="${s.birthDate||''}" style="flex:1;min-width:130px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:'Tajawal';">
+        <input type="text" class="mystu-phone" data-id="${s.id}" placeholder="رقم الجوال" value="${escapeHtml(s.phone||'')}" style="flex:1;min-width:110px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:'Tajawal';">
+        <button class="mystu-save" data-id="${s.id}">حفظ</button>
+      </div>
+    </div>`).join('')}
+  </div>
+  `;
+}
+
+function attachMyStudentsHandlers(){
+  const searchInput = document.getElementById('my-student-search-input');
+  if(searchInput) searchInput.oninput = ()=>{
+    myStudentSearch = searchInput.value;
+    rerenderMyStudentsListOnly();
+  };
+
+  const addBtn = document.getElementById('btn-add-my-student');
+  if(addBtn) addBtn.onclick = async ()=>{
+    const errEl = document.getElementById('new-stu-error');
+    if(errEl) errEl.textContent = '';
+    const name = document.getElementById('new-stu-name').value.trim();
+    if(!name){ if(errEl) errEl.textContent = 'اكتب اسم الطالب'; return; }
+    let student = state.students.find(s => s.name.trim().toLowerCase()===name.toLowerCase());
+    if(!student){
+      student = { id: 'st_' + Date.now(), name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
+      state.students.push(student);
+    }
+    student.registeredByTeacher = state.currentTeacherLink;
+    student.nationalId = document.getElementById('new-stu-id').value.trim();
+    student.birthDate = document.getElementById('new-stu-birth').value || null;
+    student.phone = document.getElementById('new-stu-phone').value.trim();
+    await saveStudents();
+    showToast('تم إضافة الطالب');
+    render();
+  };
+
+  const templateBtn = document.getElementById('btn-download-template');
+  if(templateBtn) templateBtn.onclick = downloadStudentImportTemplate;
+
+  const importTrigger = document.getElementById('btn-import-students-trigger');
+  const importInput = document.getElementById('import-students-file-input');
+  if(importTrigger && importInput){
+    importTrigger.onclick = ()=> importInput.click();
+    importInput.onchange = (e)=>{
+      const file = e.target.files[0];
+      if(file) importStudentsFromExcel(file);
+      importInput.value = '';
+    };
+  }
+
+  document.querySelectorAll('.mystu-save').forEach(b=>{
+    b.onclick = async ()=>{
+      const id = b.dataset.id;
+      const student = state.students.find(s=>s.id===id);
+      if(!student) return;
+      const idInput = document.querySelector(`.mystu-id[data-id="${CSS.escape(id)}"]`);
+      const birthInput = document.querySelector(`.mystu-birth[data-id="${CSS.escape(id)}"]`);
+      const phoneInput = document.querySelector(`.mystu-phone[data-id="${CSS.escape(id)}"]`);
+      student.nationalId = idInput.value.trim();
+      student.birthDate = birthInput.value || null;
+      student.phone = phoneInput.value.trim();
+      student.registeredByTeacher = student.registeredByTeacher || state.currentTeacherLink;
+      await saveStudents();
+      showToast('تم حفظ بيانات الطالب');
+    };
+  });
+}
+
+function rerenderMyStudentsListOnly(){
+  const myTeacherName = state.currentTeacherLink;
+  const nameSet = getTeacherStudentNames(myTeacherName);
+  const myStudents = state.students
+    .filter(s => nameSet.has(s.name.trim().toLowerCase()))
+    .filter(s => s.name.toLowerCase().includes(myStudentSearch.toLowerCase()))
+    .sort((a,b)=> a.name.localeCompare(b.name, 'ar'));
+  document.getElementById('my-students-list').innerHTML = myStudents.length===0
+    ? `<div class="empty-state">${myStudentSearch ? 'ما في نتائج مطابقة' : 'ما في طلاب مسجّلين إلك بعد'}</div>`
+    : myStudents.map(s=>`
+    <div class="acct-row-expanded">
+      <div class="acct-row-top"><span>${escapeHtml(s.name)}</span></div>
+      <div class="acct-manage-row" style="flex-wrap:wrap;">
+        <input type="text" class="mystu-id" data-id="${s.id}" placeholder="رقم الهوية" value="${escapeHtml(s.nationalId||'')}" style="flex:1;min-width:110px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:'Tajawal';">
+        <input type="date" class="mystu-birth" data-id="${s.id}" value="${s.birthDate||''}" style="flex:1;min-width:130px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:'Tajawal';">
+        <input type="text" class="mystu-phone" data-id="${s.id}" placeholder="رقم الجوال" value="${escapeHtml(s.phone||'')}" style="flex:1;min-width:110px;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-family:'Tajawal';">
+        <button class="mystu-save" data-id="${s.id}">حفظ</button>
+      </div>
+    </div>`).join('');
+  document.querySelectorAll('.mystu-save').forEach(b=>{
+    b.onclick = async ()=>{
+      const id = b.dataset.id;
+      const student = state.students.find(s=>s.id===id);
+      if(!student) return;
+      const idInput = document.querySelector(`.mystu-id[data-id="${CSS.escape(id)}"]`);
+      const birthInput = document.querySelector(`.mystu-birth[data-id="${CSS.escape(id)}"]`);
+      const phoneInput = document.querySelector(`.mystu-phone[data-id="${CSS.escape(id)}"]`);
+      student.nationalId = idInput.value.trim();
+      student.birthDate = birthInput.value || null;
+      student.phone = phoneInput.value.trim();
+      student.registeredByTeacher = student.registeredByTeacher || state.currentTeacherLink;
+      await saveStudents();
+      showToast('تم حفظ بيانات الطالب');
+    };
+  });
+}
+
+async function downloadStudentImportTemplate(){
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('الطلاب', { views: [{ rightToLeft: true }] });
+  ws.columns = [
+    { header: 'اسم الطالب', key: 'name', width: 26 },
+    { header: 'رقم الهوية', key: 'nationalId', width: 20 },
+    { header: 'تاريخ الميلاد (YYYY-MM-DD)', key: 'birthDate', width: 24 },
+    { header: 'رقم الجوال', key: 'phone', width: 20 },
+  ];
+  ws.getRow(1).font = { bold: true };
+  ws.addRow({ name: 'مثال: أحمد محمد', nationalId: '199012345', birthDate: '2012-05-14', phone: '05xxxxxxxx' });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'نموذج-بيانات-الطلاب.xlsx';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importStudentsFromExcel(file){
+  try{
+    const wb = new ExcelJS.Workbook();
+    const buf = await file.arrayBuffer();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
+    let added = 0, updated = 0;
+    ws.eachRow((row, rowNumber)=>{
+      if(rowNumber === 1) return; // header row
+      const name = String(row.getCell(1).value || '').trim();
+      if(!name || name.startsWith('مثال')) return;
+      const nationalId = String(row.getCell(2).value || '').trim();
+      let birthDateRaw = row.getCell(3).value;
+      let birthDate = '';
+      if(birthDateRaw instanceof Date){
+        birthDate = birthDateRaw.toISOString().slice(0,10);
+      } else if(birthDateRaw){
+        birthDate = String(birthDateRaw).trim();
+      }
+      const phone = String(row.getCell(4).value || '').trim();
+
+      let student = state.students.find(s => s.name.trim().toLowerCase()===name.toLowerCase());
+      if(!student){
+        student = { id: 'st_' + Date.now() + '_' + rowNumber, name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
+        state.students.push(student);
+        added++;
+      } else {
+        updated++;
+      }
+      student.registeredByTeacher = student.registeredByTeacher || state.currentTeacherLink;
+      if(nationalId) student.nationalId = nationalId;
+      if(birthDate) student.birthDate = birthDate;
+      if(phone) student.phone = phone;
+    });
+    await saveStudents();
+    showToast(`تم الاستيراد: ${added} طالب جديد، ${updated} طالب محدَّث`);
+    render();
+  }catch(e){
+    console.error(e);
+    showToast('تعذّر قراءة الملف — تأكد إنه بنفس صيغة النموذج');
+  }
+}
+
 function renderStudentCards(list){
   if(list.length===0){
     return `<div class="empty-state">${studentSearch ? 'ما في نتائج مطابقة' : 'ما في طلاب مسجّلين بعد — بينضاف الطالب أوتوماتيك أول ما تختبره'}</div>`;
@@ -3741,10 +4036,11 @@ function renderStudentCards(list){
   return list.map(s=>{
     const pct = Math.round((s.juzProgress.length/30)*100);
     const examCount = state.exams.filter(e => e.studentName.trim().toLowerCase()===s.name.trim().toLowerCase()).length;
+    const missingData = !s.nationalId || !s.birthDate || !s.phone;
     return `
     <div class="student-card" data-id="${s.id}">
       <div class="student-card-top">
-        <div class="student-name">${escapeHtml(s.name)}</div>
+        <div class="student-name">${escapeHtml(s.name)}${missingData ? ' <span class="role-badge role-badge-off" style="font-size:10px;">بيانات ناقصة</span>' : ''}</div>
         <div class="student-exam-count">${examCount} اختبار</div>
       </div>
       <div class="progress-row">
@@ -3833,6 +4129,14 @@ function studentDetailView(){
     </div>`;
   })()}
 
+  <div class="field">
+    <label>رقم الهوية (اختياري)</label>
+    <input type="text" id="student-national-id" placeholder="رقم الهوية" value="${escapeHtml(student.nationalId||'')}">
+  </div>
+  <div class="field">
+    <label>تاريخ الميلاد (اختياري)</label>
+    <input type="date" id="student-birth-date" value="${student.birthDate||''}">
+  </div>
   <div class="field">
     <label>رقم الهاتف (اختياري)</label>
     <input type="text" id="student-phone" placeholder="رقم هاتف ولي الأمر (مع رمز الدولة)" value="${escapeHtml(student.phone||'')}">
@@ -3948,6 +4252,8 @@ function attachStudentDetailHandlers(){
   if(saveBtn) saveBtn.onclick = async ()=>{
     const student = state.students.find(s => s.id===selectedStudentId);
     if(!student) return;
+    student.nationalId = document.getElementById('student-national-id').value.trim();
+    student.birthDate = document.getElementById('student-birth-date').value || null;
     student.phone = document.getElementById('student-phone').value.trim();
     student.notes = document.getElementById('student-notes').value.trim();
     student.juzProgress = [...document.querySelectorAll('.juz-progress-check:checked')].map(x=>Number(x.value));
