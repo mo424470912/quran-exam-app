@@ -597,11 +597,17 @@ const storageAdapter = {
     // Always keep an immediate local backup, regardless of connectivity.
     try{ localStorage.setItem(key, value); }catch(e){}
     if (firestoreDb) {
-      // Do NOT await this: while offline, a Firestore write's promise
-      // stays pending (it doesn't reject) until the connection returns,
-      // which would freeze the app's "saving..." step indefinitely.
-      // Firestore has already queued the write locally at this point.
+      // Mark this key as "not yet confirmed synced" BEFORE attempting the
+      // write. We don't rely solely on Firestore's own offline queue to
+      // eventually deliver it — over many days of closing/reopening the
+      // app fully offline, that queue isn't reliable enough on its own.
+      // markPendingSync/clearPendingSync (defined below) keep an
+      // independent list in plain localStorage; flushPendingSync()
+      // retries anything still marked pending, on every app start and
+      // every time connectivity returns.
+      markPendingSync(key);
       firestoreDb.collection('quran_app').doc(key).set({ value })
+        .then(() => clearPendingSync(key))
         .catch(e => console.warn('لم يتم رفع البيانات بعد لقاعدة البيانات — راح تترفع تلقائياً لما يتوفر إنترنت', e));
       return { ok: true };
     }
@@ -611,6 +617,50 @@ const storageAdapter = {
     return { ok: true };
   }
 };
+
+/* Independent "did this actually reach the server" tracking — a safety
+   net on top of Firestore's own offline queue (see storageAdapter.set
+   above). Backed by plain localStorage (not IndexedDB), so it survives
+   the app being fully closed and reopened across many offline days,
+   even in cases where Firestore's own persistence queue doesn't
+   reliably carry a write across that gap. */
+const PENDING_SYNC_KEY = 'pending_sync_keys';
+function getPendingSyncKeys(){
+  try{ return JSON.parse(localStorage.getItem(PENDING_SYNC_KEY) || '[]'); }catch(e){ return []; }
+}
+function markPendingSync(key){
+  try{
+    const keys = getPendingSyncKeys();
+    if(!keys.includes(key)){ keys.push(key); localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(keys)); }
+  }catch(e){}
+}
+function clearPendingSync(key){
+  try{
+    const keys = getPendingSyncKeys().filter(k => k !== key);
+    localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(keys));
+  }catch(e){}
+}
+let flushingPendingSync = false;
+async function flushPendingSync(){
+  if(!firestoreDb || flushingPendingSync) return;
+  const keys = getPendingSyncKeys();
+  if(!keys.length) return;
+  flushingPendingSync = true;
+  let succeeded = 0;
+  for(const key of keys){
+    try{
+      const raw = localStorage.getItem(key);
+      if(raw === null){ clearPendingSync(key); continue; } // nothing local to send
+      await withTimeout(firestoreDb.collection('quran_app').doc(key).set({ value: raw }), 8000);
+      clearPendingSync(key);
+      succeeded++;
+    }catch(e){
+      console.warn('لسا ما انرفعت البيانات لهذا المفتاح، رح يعاد المحاولة لاحقاً', key, e);
+    }
+  }
+  flushingPendingSync = false;
+  if(succeeded > 0) showToast('تم رفع البيانات المحفوظة محلياً بنجاح');
+}
 
 /* Center logo (uploaded artwork), embedded as base64 so the app
    stays a single self-contained HTML file. */
@@ -649,6 +699,15 @@ function showToast(msg){
    - Legacy mode (no Firebase configured): state.accounts comes from the
      old single localStorage/window.storage document, same as before. */
 async function loadAppData(){
+  // Critical ordering: push any not-yet-confirmed local writes from a
+  // previous offline session BEFORE reading anything from the server.
+  // Otherwise, a `get()` below could succeed online and overwrite our
+  // local (newer, unsynced) data with a stale server copy — silently
+  // destroying real results that were only ever saved locally. This is
+  // the fix for "tested students all week offline, then the data never
+  // showed up once back online."
+  await flushPendingSync();
+
   try{
     const ex = await storageAdapter.get(STORAGE_EXAMS);
     state.exams = ex ? JSON.parse(ex.value) : [];
@@ -5059,6 +5118,7 @@ window.addEventListener('offline', ()=>{
 });
 window.addEventListener('online', ()=>{
   showToast('رجع الاتصال بالإنترنت — جاري رفع البيانات المحفوظة');
+  flushPendingSync();
 });
 
 /* Register the service worker so the app shell (this page's HTML/CSS/JS,
