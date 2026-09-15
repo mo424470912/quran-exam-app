@@ -1413,7 +1413,7 @@ function attachAuthHandlers(){
         state.currentRole = data.role || 'examiner';
         state.currentTeacherLink = data.teacherLink || null;
         state.currentUid = cred.user.uid;
-        state.view = state.currentRole==='teacher' ? 'schedule' : 'test';
+        state.view = state.currentRole==='teacher' ? 'schedule' : 'dashboard';
         render();
       }catch(e){
         errEl.textContent = mapAuthError(e);
@@ -1431,7 +1431,7 @@ function attachAuthHandlers(){
     state.currentRole = found.role || 'examiner';
     state.currentTeacherLink = found.teacherLink || null;
     state.currentLocalId = found.localId || null;
-    state.view = state.currentRole==='teacher' ? 'schedule' : 'test';
+    state.view = state.currentRole==='teacher' ? 'schedule' : 'dashboard';
     render();
   };
 
@@ -1532,7 +1532,7 @@ function attachAuthHandlers(){
     state.currentTeacherLink = acc.teacherLink || null;
     state.currentLocalId = acc.localId || null;
     state.authMode = 'login';
-    state.view = state.currentRole==='teacher' ? 'schedule' : 'test';
+    state.view = state.currentRole==='teacher' ? 'schedule' : 'dashboard';
     showToast('تم استرجاع الوصول وتسجيل الدخول بنجاح');
     render();
   };
@@ -1575,7 +1575,7 @@ function attachAuthHandlers(){
         state.currentTeacherLink = teacherLink || null;
         state.currentUid = cred.user.uid;
         state.authMode = 'login';
-        state.view = role==='teacher' ? 'schedule' : 'test';
+        state.view = role==='teacher' ? 'schedule' : 'dashboard';
         render();
       }catch(e){
         errEl.textContent = mapAuthError(e);
@@ -1596,7 +1596,7 @@ function attachAuthHandlers(){
     state.currentTeacherLink = teacherLink || null;
     state.currentLocalId = newAcc.localId;
     state.authMode = 'login';
-    state.view = role==='teacher' ? 'schedule' : 'test';
+    state.view = role==='teacher' ? 'schedule' : 'dashboard';
     render();
   };
 }
@@ -1607,6 +1607,7 @@ function iconHistory(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="cur
 function iconSettings(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`; }
 function iconStats(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg>`; }
 function iconBook(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>`; }
+function iconDashboard(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>`; }
 function iconStudents(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="3.2"/><path d="M2.5 20c0-3.6 2.9-6.4 6.5-6.4s6.5 2.8 6.5 6.4"/><circle cx="17.5" cy="8" r="2.4"/><path d="M15.5 13.6c2.9.4 4.9 2.7 5 6.4"/></svg>`; }
 function iconStarSvg(){ return `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 7.1-1.01z"/></svg>`; }
 function iconTeacherIcon(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>`; }
@@ -1619,13 +1620,34 @@ function effectiveView(){
   return isTeacherRole && !['schedule','history','memorization','myStudents','settings'].includes(state.view) ? 'schedule' : state.view;
 }
 
+function syncStatusBadge(){
+  const pending = getPendingSyncKeys().length;
+  const online = navigator.onLine;
+  let bg, text, label;
+  if(!firestoreDb){
+    return ''; // legacy/local-only mode — nothing to sync, badge would be noise
+  }
+  if(pending > 0){
+    bg = 'rgba(224,180,92,0.25)'; text = '#E0B45C';
+    label = online ? `⏳ جاري رفع ${pending} عنصر...` : `⏳ ${pending} عنصر بانتظار الاتصال`;
+  } else if(!online){
+    bg = 'rgba(224,180,92,0.25)'; text = '#E0B45C';
+    label = '📴 غير متصل — البيانات محفوظة محلياً';
+  } else {
+    bg = 'rgba(255,255,255,0.15)'; text = '#fff';
+    label = '✅ كل البيانات مرفوعة';
+  }
+  return `<div id="sync-status-badge" style="display:inline-block; margin-top:4px; padding:3px 10px; border-radius:20px; font-size:10.5px; font-weight:700; background:${bg}; color:${text};">${label}</div>`;
+}
+
 function mainScreen(){
   const isTeacherRole = state.currentRole === 'teacher';
   const showStudentTitle = state.view==='test' && testForm.stage==='scoring' && testForm.studentName;
   const title = showStudentTitle ? escapeHtml(testForm.studentName) : 'اختبارات حفظ القرآن الكريم';
   const examLocked = state.view==='test' && testForm.stage==='scoring';
   const currentView = effectiveView();
-  const viewFn = currentView==='test' ? testView
+  const viewFn = currentView==='dashboard' ? dashboardView
+    : currentView==='test' ? testView
     : currentView==='history' ? historyView
     : currentView==='stats' ? statsView
     : currentView==='students' ? studentsView
@@ -1638,6 +1660,7 @@ function mainScreen(){
     <div>
       <h2>${title}</h2>
       <div class="who">مرحباً، ${escapeHtml(state.currentUser)}${state.currentRole ? ` <span class="role-badge">${roleLabel[state.currentRole] || state.currentRole}</span>` : ''}</div>
+      ${syncStatusBadge()}
     </div>
     <button class="logout" id="btn-logout">خروج</button>
   </div>
@@ -1652,6 +1675,7 @@ function mainScreen(){
     <button class="tab-btn ${currentView==='history'?'active':''}" data-view="history">${iconHistory()}<span>نتائج طلابي</span></button>
     <button class="tab-btn ${currentView==='settings'?'active':''}" data-view="settings">${iconSettings()}<span>الإعدادات</span></button>
     ` : `
+    <button class="tab-btn ${state.view==='dashboard'?'active':''} ${examLocked?'tab-locked':''}" data-view="dashboard">${iconDashboard()}<span>الرئيسية</span></button>
     <button class="tab-btn ${state.view==='test'?'active':''}" data-view="test">${iconTest()}<span>الاختبار</span></button>
     <button class="tab-btn ${state.view==='history'?'active':''} ${examLocked?'tab-locked':''}" data-view="history">${iconHistory()}<span>السجل</span></button>
     <button class="tab-btn ${state.view==='students'?'active':''} ${examLocked?'tab-locked':''}" data-view="students">${iconStudents()}<span>الطلاب</span></button>
@@ -1698,6 +1722,7 @@ function attachMainHandlers(){
     : null;
 
   const currentView = effectiveView();
+  if(currentView==='dashboard') attachDashboardHandlers();
   if(currentView==='test') attachTestHandlers();
   if(currentView==='history') attachHistoryHandlers();
   if(currentView==='stats') attachStatsHandlers();
@@ -1841,7 +1866,7 @@ function testSetupView(){
     </div>
     <div id="single-juz" style="display:${testForm.juzMode!=='multi'?'block':'none'};">
       <select id="f-juz">
-        ${Array.from({length:30},(_,i)=>i+1).map(n=>`<option value="${n}" ${String(testForm.juz)===String(n)?'selected':''}>الجزء ${juzOrdinal(n)}</option>`).join('')}
+        ${Array.from({length:30},(_,i)=>30-i).map(n=>`<option value="${n}" ${String(testForm.juz)===String(n)?'selected':''}>الجزء ${juzOrdinal(n)}${JUZ_NICKNAMES[n] ? ` (${JUZ_NICKNAMES[n]})` : ''}</option>`).join('')}
       </select>
     </div>
     <div id="multi-juz" style="display:${testForm.juzMode==='multi'?'block':'none'};">
@@ -2700,6 +2725,14 @@ const JUZ_ORDINALS = [null,'الأول','الثاني','الثالث','الرا�
   'الحادي عشر','الثاني عشر','الثالث عشر','الرابع عشر','الخامس عشر','السادس عشر','السابع عشر','الثامن عشر','التاسع عشر','العشرون',
   'الحادي والعشرون','الثاني والعشرون','الثالث والعشرون','الرابع والعشرون','الخامس والعشرون','السادس والعشرون','السابع والعشرون','الثامن والعشرون','التاسع والعشرون','الثلاثون'];
 
+// Popular nicknames for the last 10 juz' (21-30), used widely in
+// memorization circles — each juz here either starts a clean new surah
+// (28-30) or is commonly referred to by the surah it mostly covers.
+const JUZ_NICKNAMES = {
+  21: 'العنكبوت', 22: 'الأحزاب', 23: 'يس', 24: 'الزمر', 25: 'فصلت',
+  26: 'الأحقاف', 27: 'الذاريات', 28: 'المجادلة', 29: 'تبارك', 30: 'عمّ',
+};
+
 function juzOrdinal(n){
   return JUZ_ORDINALS[n] || String(n);
 }
@@ -3456,6 +3489,78 @@ async function exportDailyResultsPDF(btnEl){
 }
 
 /* ---------------- STATS VIEW ---------------- */
+/* ---------------- DASHBOARD (نظرة عامة) — admin/examiner landing page ---------------- */
+function dashboardView(){
+  const todayStr = todayStamp();
+  const todayExamsCount = visibleExams().filter(e => e.date.slice(0,10) === todayStr).length;
+
+  const upcomingWeek = state.schedule
+    .filter(s => !s.done)
+    .filter(s => {
+      const d = new Date(s.date); const now = new Date();
+      const diffDays = (d - now) / 86400000;
+      return diffDays >= -0.5 && diffDays <= 7;
+    })
+    .sort((a,b) => new Date(a.date) - new Date(b.date));
+
+  const missingDataCount = state.students.filter(s => !s.nationalId || !s.birthDate || !s.phone).length;
+
+  const INACTIVE_DAYS = 21;
+  const now = Date.now();
+  const inactiveTeachers = TEACHERS.map(teacher=>{
+    const sessions = state.memorization.filter(m => m.teacherName === teacher);
+    if(!sessions.length) return { teacher, daysSince: null };
+    const lastDate = sessions.reduce((max, m) => Math.max(max, new Date(m.date).getTime()), 0);
+    const daysSince = Math.floor((now - lastDate) / 86400000);
+    return { teacher, daysSince };
+  }).filter(t => t.daysSince === null || t.daysSince >= INACTIVE_DAYS);
+
+  return `
+  <div class="section-title">نظرة عامة</div>
+
+  <div class="stat-row">
+    <div class="stat-card"><div class="num">${todayExamsCount}</div><div class="lbl">اختبارات اليوم</div></div>
+    <div class="stat-card"><div class="num">${upcomingWeek.length}</div><div class="lbl">مواعيد الأسبوع الجاي</div></div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-card"><div class="num">${state.students.length}</div><div class="lbl">إجمالي الطلاب</div></div>
+    <div class="stat-card"><div class="num">${missingDataCount}</div><div class="lbl">بيانات ناقصة</div></div>
+  </div>
+
+  <div class="settings-block">
+    <h3>مواعيد الأسبوع الجاي</h3>
+    ${upcomingWeek.length===0 ? `<p style="font-size:12.5px; color:var(--ink-soft);">ما في مواعيد محجوزة خلال الأسبوع الجاي.</p>` : upcomingWeek.slice(0,8).map(s=>{
+      const d = new Date(s.date).toLocaleDateString('ar-EG', {weekday:'long', month:'short', day:'numeric'});
+      return `<div class="backup-row"><span style="font-size:12.5px;">${escapeHtml(s.studentName)}<br><span style="font-size:11px;color:var(--ink-soft);">${escapeHtml(s.teacherName||'—')} · ${d}</span></span></div>`;
+    }).join('')}
+    ${upcomingWeek.length ? `<button class="link-btn" id="btn-dash-view-schedule" style="margin-top:8px;">شوف كل المواعيد ›</button>` : ''}
+  </div>
+
+  <div class="settings-block">
+    <h3>محفّظين محتاجين متابعة</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">ما سجّلوا حصة تحفيظ من ${INACTIVE_DAYS} يوم أو أكتر</p>
+    ${inactiveTeachers.length===0 ? `<p style="font-size:12.5px; color:var(--green);">كل المحفّظين نشيطين 👍</p>` : inactiveTeachers.map(t=>`
+      <div class="backup-row"><span style="font-size:12.5px;">${escapeHtml(t.teacher)}</span><span style="font-size:11px; color:var(--amber);">${t.daysSince===null ? 'ما سجّل ولا حصة' : `من ${t.daysSince} يوم`}</span></div>
+    `).join('')}
+  </div>
+
+  ${missingDataCount > 0 ? `
+  <div class="settings-block">
+    <h3>طلاب بياناتهم ناقصة</h3>
+    <p style="font-size:12.5px; color:var(--ink-soft); margin-bottom:8px;">${missingDataCount} طالب ناقصهم رقم هوية أو تاريخ ميلاد أو رقم جوال.</p>
+    <button class="link-btn" id="btn-dash-view-students">شوف قائمة الطلاب ›</button>
+  </div>
+  ` : ''}
+  `;
+}
+
+function attachDashboardHandlers(){
+  const scheduleBtn = document.getElementById('btn-dash-view-schedule');
+  if(scheduleBtn) scheduleBtn.onclick = ()=>{ state.view = 'students'; render(); };
+  const studentsBtn = document.getElementById('btn-dash-view-students');
+  if(studentsBtn) studentsBtn.onclick = ()=>{ state.view = 'students'; render(); };
+}
+
 function statsView(){
   const studentCounts = {}, teacherCounts = {}, studentScores = {};
   state.exams.forEach(e=>{
@@ -3683,6 +3788,11 @@ function scheduleSection(){
       <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;">الحجز متاح أيام السبت والاثنين والأربعاء فقط، وبحد أقصى ${BOOKING_MAX_PER_DAY} طلاب باليوم الواحد.</div>
     </div>
     <div class="field"><input type="text" id="sch-note" placeholder="ملاحظة (اختياري)"></div>
+    ${!isTeacherRole ? `
+    <div class="field" style="display:flex; align-items:center; gap:8px; background:var(--red-soft); padding:10px 12px; border-radius:10px;">
+      <input type="checkbox" id="sch-override" style="width:18px; height:18px; accent-color:var(--red); flex-shrink:0;">
+      <label for="sch-override" style="font-size:12.5px; color:var(--red); font-weight:700; margin:0;">صلاحية استثنائية: اسمح للطالب يحجز رغم رسوبه خلال آخر أسبوع</label>
+    </div>` : ''}
     <div id="sch-error" style="font-size:12px;color:var(--red);margin-bottom:8px;"></div>
     <button class="btn btn-primary" id="btn-save-schedule" style="margin-bottom:16px;">حفظ الموعد</button>
   </div>
@@ -3692,11 +3802,12 @@ function scheduleSection(){
         const isToday = s.date === todayStr;
         const isOverdue = s.date < todayStr;
         const badge = isOverdue ? '<span class="sch-badge overdue">متأخر</span>' : (isToday ? '<span class="sch-badge today">اليوم</span>' : '');
+        const overrideBadge = s.overriddenBy ? `<span class="sch-badge overdue" title="حجز استثنائي أضافه ${escapeHtml(s.overriddenBy)} رغم رسوب الطالب مؤخراً">استثنائي</span>` : '';
         const d = new Date(s.date + 'T00:00:00').toLocaleDateString('ar-EG', {month:'short', day:'numeric'});
         return `
         <div class="schedule-row">
           <div>
-            <div class="sch-name">${escapeHtml(s.studentName)} ${badge}</div>
+            <div class="sch-name">${escapeHtml(s.studentName)} ${badge}${overrideBadge}</div>
             <div class="sch-meta">${d}${(!isTeacherRole && s.teacherName) ? ' · المحفّظ: ' + escapeHtml(s.teacherName) : ''}${s.note ? ' · ' + escapeHtml(s.note) : ''}</div>
           </div>
           <div class="sch-actions">
@@ -3774,12 +3885,17 @@ function attachScheduleHandlers(){
       if(errEl) errEl.textContent = msg; showToast(msg); return;
     }
     const blockReason = studentBookingBlockedReason(studentName);
-    if(blockReason){
+    const overrideEl = document.getElementById('sch-override');
+    const isOverride = state.currentRole !== 'teacher' && overrideEl && overrideEl.checked;
+    if(blockReason && !isOverride){
       if(errEl) errEl.textContent = blockReason; showToast(blockReason); return;
     }
-    state.schedule.push({ id: 'sc_' + Date.now(), studentName, teacherName, date, note, done:false, createdAt: new Date().toISOString() });
+    state.schedule.push({
+      id: 'sc_' + Date.now(), studentName, teacherName, date, note, done:false, createdAt: new Date().toISOString(),
+      ...(blockReason && isOverride ? { overriddenBy: state.currentUser } : {}),
+    });
     await saveSchedule();
-    showToast('تم إضافة الموعد');
+    showToast(blockReason && isOverride ? 'تم إضافة الموعد استثنائياً رغم الرسوب الأخير' : 'تم إضافة الموعد');
     render();
   };
 
@@ -5120,6 +5236,14 @@ window.addEventListener('online', ()=>{
   showToast('رجع الاتصال بالإنترنت — جاري رفع البيانات المحفوظة');
   flushPendingSync();
 });
+
+/* Keep the sync-status badge in the topbar live (pending count changes
+   asynchronously as writes/flushes resolve, with nothing else in the
+   UI necessarily triggering a re-render at that moment). */
+setInterval(()=>{
+  const badge = document.getElementById('sync-status-badge');
+  if(badge && state.currentUser) badge.outerHTML = syncStatusBadge();
+}, 4000);
 
 /* Register the service worker so the app shell (this page's HTML/CSS/JS,
    fonts, and icons) loads instantly even with zero connectivity — the
