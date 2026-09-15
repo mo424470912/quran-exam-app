@@ -1735,14 +1735,14 @@ function attachMainHandlers(){
 
 /* ---------------- TEST VIEW ---------------- */
 let testForm = {
-  studentName:'', teacherName:'', juz:'1', juzMode:'single', notes:'',
+  studentName:'', teacherName:'', juz:'30', juzMode:'single', notes:'',
   clicks: [], // stack of {type, value}
   questionsDone: [false,false,false,false,false],
   stage: 'setup', // setup | scoring
   startedAt: null, // timestamp when scoring began — powers the live exam timer
 };
 function resetTestForm(){
-  testForm = { studentName:'', teacherName:'', juz:'1', juzMode:'single', notes:'', clicks:[], questionsDone:[false,false,false,false,false], stage:'setup', startedAt:null };
+  testForm = { studentName:'', teacherName:'', juz:'30', juzMode:'single', notes:'', clicks:[], questionsDone:[false,false,false,false,false], stage:'setup', startedAt:null };
 }
 function currentScore(){
   const total = testForm.clicks.reduce((s,c)=> s + c.value, 0);
@@ -1873,7 +1873,7 @@ function testSetupView(){
       <div style="font-size:12px;color:var(--ink-soft);margin-bottom:7px;">اختر الأجزاء يلي بدك تختبر فيها الطالب:</div>
       <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;">
         ${Array.from({length:30},(_,i)=>i+1).map(n=>{
-          const selectedParts = String(testForm.juz).match(/\\d+/g) || [];
+          const selectedParts = String(testForm.juz).match(/\d+/g) || [];
           const checked = selectedParts.includes(String(n)) ? 'checked' : '';
           return `
           <label style="font-size:12px;background:#FCFAF3;border:1px solid var(--line);border-radius:8px;padding:7px 3px;text-align:center;cursor:pointer;">
@@ -1980,7 +1980,7 @@ function attachTestSetupHandlers(){
     b.onclick = ()=>{
       testForm.juzMode = b.dataset.mode;
       if(testForm.juzMode==='multi' && !String(testForm.juz).startsWith('الأجزاء:')) testForm.juz = 'تجميعي';
-      if(testForm.juzMode==='single' && String(testForm.juz).match(/^\\d+$/) === null) testForm.juz = '1';
+      if(testForm.juzMode==='single' && String(testForm.juz).match(/^\d+$/) === null) testForm.juz = '30';
       render();
     };
   });
