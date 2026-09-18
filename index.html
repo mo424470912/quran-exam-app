@@ -4430,6 +4430,98 @@ function rerenderMyStudentsListOnly(){
   });
 }
 
+/* Exam-results recovery import — for exams that were completed and
+   scored but never made it into the saved data (e.g. the device
+   closed before the write went through). Lets an admin/examiner
+   re-enter them from a spreadsheet in bulk instead of redoing each
+   exam one by one through the scoring screen. */
+async function downloadExamImportTemplate(){
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('نتائج الاختبارات', { views: [{ rightToLeft: true }] });
+  ws.columns = [
+    { header: 'اسم الطالب', key: 'name', width: 26 },
+    { header: 'اسم المحفّظ', key: 'teacher', width: 24 },
+    { header: 'الجزء (رقم)', key: 'juz', width: 14 },
+    { header: 'العلامة (أو اكتب إعادة)', key: 'score', width: 20 },
+    { header: 'التاريخ (YYYY-MM-DD)', key: 'date', width: 20 },
+  ];
+  ws.getRow(1).font = { bold: true };
+  ws.addRow({ name: 'مثال: أحمد محمد', teacher: 'سيف الدين الجرجاوي', juz: 21, score: 95, date: '2026-09-12' });
+  ws.addRow({ name: 'مثال: خالد سامي', teacher: 'محمود بكير', juz: 29, score: 'إعادة', date: '2026-09-12' });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'نموذج-نتائج-اختبارات.xlsx';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importExamsFromExcel(file){
+  try{
+    const wb = new ExcelJS.Workbook();
+    const buf = await file.arrayBuffer();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
+    let added = 0;
+    const batchEntries = [];
+    let rowIndex = 0;
+    ws.eachRow((row, rowNumber)=>{
+      if(rowNumber === 1) return; // header row
+      const name = String(row.getCell(1).value || '').trim();
+      if(!name || name.startsWith('مثال')) return;
+      const teacherName = String(row.getCell(2).value || '').trim();
+      const juz = String(row.getCell(3).value || '').trim();
+      const scoreRaw = String(row.getCell(4).value || '').trim();
+      let dateRaw = row.getCell(5).value;
+      let dateStr = '';
+      if(dateRaw instanceof Date) dateStr = dateRaw.toISOString().slice(0,10);
+      else if(dateRaw) dateStr = String(dateRaw).trim();
+      if(!name || !juz || !dateStr) return;
+
+      const isRetry = /إعادة|retry/i.test(scoreRaw);
+      const score = isRetry ? 0 : (parseFloat(scoreRaw) || 0);
+      rowIndex++;
+      const record = {
+        id: 'e_' + Date.now() + '_' + rowIndex,
+        studentName: name,
+        teacherName,
+        juz,
+        notes: '',
+        testerName: state.currentUser,
+        deductions: { lahn: 0, khataa: 0, tanbih: 0 },
+        score,
+        date: new Date(dateStr + 'T12:00:00').toISOString(),
+        ...(isRetry ? { stoppedEarly: true } : {}),
+        importedFromExcel: true,
+      };
+      state.exams.unshift(record);
+      upsertStudentFromExam(record);
+      batchEntries.push({ examId: record.id });
+      added++;
+    });
+    if(batchEntries.length){
+      state.importBatches.unshift({
+        id: 'ib_' + Date.now(),
+        source: 'exams-excel',
+        date: new Date().toISOString(),
+        importedBy: state.currentUser,
+        fileName: file.name,
+        entries: batchEntries,
+      });
+      await saveImportBatches();
+    }
+    state.exams.sort((a,b)=> new Date(b.date) - new Date(a.date));
+    await saveExams();
+    await saveStudents();
+    showToast(`تم استرجاع ${added} نتيجة اختبار بنجاح`);
+    render();
+  }catch(e){
+    console.error(e);
+    showToast('تعذّر قراءة الملف — تأكد إنه بنفس صيغة النموذج');
+  }
+}
+
 async function downloadStudentImportTemplate(){
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('الطلاب', { views: [{ rightToLeft: true }] });
@@ -4522,6 +4614,36 @@ async function importStudentsFromExcel(file){
 async function undoImportBatch(batchId){
   const batch = state.importBatches.find(b => b.id===batchId);
   if(!batch) return;
+
+  if(batch.source === 'exams-excel'){
+    if(!confirm(`متأكد إنك بدك تتراجع عن استيراد هذه النتائج (${batch.entries.length} اختبار)؟`)) return;
+    const examIds = new Set(batch.entries.map(e => e.examId));
+    const affectedStudents = new Set(state.exams.filter(e => examIds.has(e.id)).map(e => e.studentName.trim().toLowerCase()));
+    state.exams = state.exams.filter(e => !examIds.has(e.id));
+    // Recompute juzProgress for affected students from their remaining
+    // real exam history, so an undone import doesn't leave behind a
+    // "completed juz" that no longer has a passing exam backing it.
+    affectedStudents.forEach(nameKey=>{
+      const student = state.students.find(s => s.name.trim().toLowerCase()===nameKey);
+      if(!student) return;
+      student.juzProgress = [];
+      state.exams
+        .filter(e => e.studentName.trim().toLowerCase()===nameKey && !e.stoppedEarly && e.score >= 80)
+        .forEach(e=>{
+          (String(e.juz).match(/\d+/g) || []).map(Number).forEach(n=>{
+            if(n>=1 && n<=30 && !student.juzProgress.includes(n)) student.juzProgress.push(n);
+          });
+        });
+    });
+    state.importBatches = state.importBatches.filter(b => b.id !== batchId);
+    await saveExams();
+    await saveStudents();
+    await saveImportBatches();
+    showToast(`تم التراجع: ${examIds.size} اختبار محذوف`);
+    render();
+    return;
+  }
+
   if(!confirm(`متأكد إنك بدك تتراجع عن هذا الاستيراد (${batch.entries.length} طالب)؟`)) return;
 
   let removed = 0, reverted = 0;
@@ -4915,6 +5037,29 @@ function settingsView(){
 
   ${(isAdmin || state.currentRole==='examiner') ? `
   <div class="settings-block">
+    <h3>استيراد نتائج اختبارات (استرجاع بيانات)</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">لو ضاعت نتائج اختبارات قبل ما تتحفظ (انقطاع نت، إغلاق البرنامج...)، حمّل النموذج وعبّيه بالنتائج يدوياً وارفعه هون — بينضافوا كسجلات اختبار كاملة.</p>
+    <div class="data-btn-row">
+      <button id="btn-download-exam-template">تحميل نموذج فارغ</button>
+      <button class="ghost" id="btn-import-exams-trigger">استيراد ملف Excel</button>
+    </div>
+    <input type="file" id="import-exams-file-input" accept=".xlsx" style="display:none;">
+    ${state.importBatches.filter(b=>b.source==='exams-excel').length ? `
+    <div style="margin-top:14px;">
+      <div style="font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px;">آخر عمليات استيراد النتائج</div>
+      ${state.importBatches.filter(b=>b.source==='exams-excel').slice(0,8).map(b=>{
+        const d = new Date(b.date).toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
+        return `<div class="backup-row">
+          <span style="font-size:12.5px;">${escapeHtml(b.fileName||'ملف Excel')} — ${b.entries.length} نتيجة<br><span style="font-size:11px;color:var(--ink-soft);">${d} · ${escapeHtml(b.importedBy||'')}</span></span>
+          <button class="undo-import-batch" data-id="${b.id}" style="color:var(--red);">تراجع</button>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+  </div>
+  ` : ''}
+
+  ${(isAdmin || state.currentRole==='examiner') ? `
+  <div class="settings-block">
     <h3>إرسال إشعار للمحفّظين</h3>
     <div class="field">
       <label>المستلم</label>
@@ -5108,6 +5253,24 @@ function attachSettingsHandlers(){
     const monthInput = document.getElementById('batch-cert-month');
     generateBatchCertificatesPDF(monthInput ? monthInput.value : '', genBatchBtn);
   };
+
+  const examTemplateBtn = document.getElementById('btn-download-exam-template');
+  if(examTemplateBtn) examTemplateBtn.onclick = downloadExamImportTemplate;
+
+  const importExamsTrigger = document.getElementById('btn-import-exams-trigger');
+  const importExamsInput = document.getElementById('import-exams-file-input');
+  if(importExamsTrigger && importExamsInput){
+    importExamsTrigger.onclick = ()=> importExamsInput.click();
+    importExamsInput.onchange = (e)=>{
+      const file = e.target.files[0];
+      if(file) importExamsFromExcel(file);
+      importExamsInput.value = '';
+    };
+  }
+
+  document.querySelectorAll('.undo-import-batch').forEach(b=>{
+    b.onclick = ()=> undoImportBatch(b.dataset.id);
+  });
 
   const sendNotifBtn = document.getElementById('btn-send-notif');
   if(sendNotifBtn) sendNotifBtn.onclick = async ()=>{
