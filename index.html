@@ -261,7 +261,7 @@ body{
 .record-alert .record-meta b{ color:var(--red); }
 .record-meta{ font-size:12.5px; color:var(--ink-soft); line-height:1.9; }
 .record-meta b{ color:var(--ink); font-weight:600; }
-.record-actions{ display:flex; gap:10px; margin-top:10px; }
+.record-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
 .record-del{ background:none; border:none; color:var(--red); font-size:12px; cursor:pointer; font-family:'Tajawal'; font-weight:700; }
 .record-share{
   background:none; border:none; color:var(--green); font-size:12px; cursor:pointer;
@@ -269,6 +269,11 @@ body{
 }
 .record-share svg{ width:14px; height:14px; }
 .record-share:disabled{ opacity:0.5; cursor:default; }
+.record-whatsapp{
+  background:none; border:none; color:#25D366; font-size:12px; cursor:pointer;
+  font-family:'Tajawal'; font-weight:700; display:flex; align-items:center; gap:4px;
+}
+.record-whatsapp svg{ width:14px; height:14px; }
 .empty-state{ text-align:center; color:var(--ink-soft); padding:40px 20px; font-size:14px; }
 .history-toolbar{ display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
 .btn-report{
@@ -379,6 +384,7 @@ const STORAGE_SCHEDULE = 'schedule';
 const STORAGE_NOTIFICATIONS = 'notifications';
 const STORAGE_MEMORIZATION = 'memorization';
 const STORAGE_IMPORT_BATCHES = 'importBatches';
+const STORAGE_CENTER_SETTINGS = 'centerSettings';
 
 /* Dark mode: applied immediately (before first render) so there's no
    flash of the light theme, and remembered per-device via localStorage. */
@@ -660,6 +666,7 @@ async function flushPendingSync(){
   }
   flushingPendingSync = false;
   if(succeeded > 0) showToast('تم رفع البيانات المحفوظة محلياً بنجاح');
+  updateAppBadge();
 }
 
 /* Center logo (uploaded artwork), embedded as base64 so the app
@@ -681,6 +688,7 @@ let state = {
   notifications: [], // {id, message, teacherName (null = all teachers), from, createdAt, readBy: [usernames]}
   memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo, quality, note, date, recordedBy}
   importBatches: [], // {id, source:'students-excel', date, importedBy, teacherName, entries:[{studentId, wasNew, prevSnapshot|null}]}
+  centerSettings: null, // {name, fullName, tagline, directorName, logoDataUri} — null until loaded; getCenterSettings() below fills in defaults
   authMode: 'login', // login | register
 };
 
@@ -732,6 +740,10 @@ async function loadAppData(){
     const ib = await storageAdapter.get(STORAGE_IMPORT_BATCHES);
     state.importBatches = ib ? JSON.parse(ib.value) : [];
   }catch(e){ state.importBatches = []; }
+  try{
+    const cs = await storageAdapter.get(STORAGE_CENTER_SETTINGS);
+    state.centerSettings = cs ? JSON.parse(cs.value) : {};
+  }catch(e){ state.centerSettings = {}; }
 
   if (firebaseAuth && firestoreDb){
     await loadAccountsFromFirestore();
@@ -855,7 +867,7 @@ async function exportDataExcel(){
   if(typeof ExcelJS === 'undefined'){ showToast('تعذّر تحميل مكتبة إكسل — تحقق من الاتصال بالإنترنت وحاول ثانية'); return; }
   try{
     const wb = new ExcelJS.Workbook();
-    wb.creator = 'مركز السيد هاشم لتعليم وتحفيظ القرآن الكريم';
+    wb.creator = getCenterSettings().fullName;
     wb.created = new Date();
 
     const GREEN = 'FF1B4332', GOLD = 'FFC08A28', CREAM = 'FFF7F1E4', LINE = 'FFE4DBC6', RED = 'FFA23E36', GOLD_SOFT = 'FFF4E6C4';
@@ -892,7 +904,7 @@ async function exportDataExcel(){
     // -- decorative title banner (certificate-style header) --
     wsExams.mergeCells('A1:E1');
     const titleCell = wsExams.getCell('A1');
-    titleCell.value = 'مركز السيد هاشم لتعليم وتحفيظ القرآن الكريم';
+    titleCell.value = getCenterSettings().fullName;
     titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' }, name: 'Arial' };
     titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
     titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GREEN } };
@@ -1224,12 +1236,13 @@ function loadingScreen(){
 function authScreen(){
   const isRegister = state.authMode === 'register' || (state.accounts.length === 0 && !accountsLoadFailed);
   const isRecover = state.authMode === 'recover' && state.accounts.length > 0;
+  const cs = getCenterSettings();
   return `
   <div class="auth-wrap">
     <div class="brand">
-      <div class="brand-mark"><img src="${LOGO_DATA_URI}" alt="شعار مدرسة السيد هاشم القرآنية"></div>
-      <div class="brand-name">مركز السيد هاشم</div>
-      <div class="brand-badge">لتعليم و تحفيظ القرآن الكريم</div>
+      <div class="brand-mark"><img src="${cs.logoDataUri}" alt="شعار ${escapeHtml(cs.name)}"></div>
+      <div class="brand-name">${escapeHtml(cs.name)}</div>
+      <div class="brand-badge">${escapeHtml(cs.tagline)}</div>
       <div class="brand-title-row">
         ${sparkleIconSvg()}
         <h1>برنامج اختبارات القرآن الكريم</h1>
@@ -1237,7 +1250,7 @@ function authScreen(){
       </div>
       <div class="brand-sub-row">
         <span class="ln"></span>
-        <p>مركز السيد هاشم لتعليم و تحفيظ القرآن الكريم</p>
+        <p>${escapeHtml(cs.fullName)}</p>
         <span class="ln"></span>
       </div>
     </div>
@@ -1794,10 +1807,31 @@ const TEACHERS = [
   'سعيد الصفدي',
 ];
 
-const CENTER_DIRECTOR_NAME = 'مشعل نصر مطر';
+const CENTER_DIRECTOR_NAME = 'مشعل نصر مطر'; // default, used until an admin customizes it in Settings
+const CENTER_NAME_DEFAULT = 'مركز السيد هاشم';
+const CENTER_FULLNAME_DEFAULT = 'مركز السيد هاشم لتعليم وتحفيظ القرآن الكريم';
+const CENTER_TAGLINE_DEFAULT = 'لتعليم و تحفيظ القرآن الكريم';
 const BOOKING_ALLOWED_WEEKDAYS = [6, 1, 3]; // Saturday, Monday, Wednesday (JS getDay(): Sun=0..Sat=6)
 const BOOKING_MAX_PER_DAY = 10;
 const BOOKING_FAIL_COOLDOWN_DAYS = 7;
+
+/* Center identity (name/logo/director) — customizable from Settings so
+   this same program can be rebranded for a different center without
+   touching code. Falls back to the defaults above until an admin
+   changes anything, so nothing breaks for centers that never bother. */
+function getCenterSettings(){
+  const s = state.centerSettings || {};
+  return {
+    name: s.name || CENTER_NAME_DEFAULT,
+    fullName: s.fullName || CENTER_FULLNAME_DEFAULT,
+    tagline: s.tagline || CENTER_TAGLINE_DEFAULT,
+    directorName: s.directorName || CENTER_DIRECTOR_NAME,
+    logoDataUri: s.logoDataUri || LOGO_DATA_URI,
+  };
+}
+async function saveCenterSettings(){
+  await storageAdapter.set(STORAGE_CENTER_SETTINGS, JSON.stringify(state.centerSettings || {}));
+}
 
 function studentSuggestions(){
   const names = [...new Set(state.students.map(s=>s.name).filter(Boolean))];
@@ -2170,6 +2204,7 @@ function historyView(){
     <button class="btn-report" id="btn-monthly-report">${iconReport()} تقرير شهري</button>
     <button class="btn-report" id="btn-daily-png">${iconShare()} نتائج اليوم PNG</button>
     <button class="btn-report" id="btn-daily-pdf">${iconShare()} نتائج اليوم PDF</button>
+    <button class="btn-report" id="btn-batch-certs">${iconReport()} شهادات الشهر (PDF)</button>
   </div>
   <div class="search-box">
     <input type="text" id="search-input" placeholder="ابحث عن طالب..." value="${escapeHtml(historySearch)}">
@@ -2239,6 +2274,10 @@ function renderRecords(list, totalCount){
       </div>
       <div class="record-actions">
         ${!isRetry ? `<button class="record-share" data-id="${r.id}">${iconShare()} مشاركة شهادة</button>` : ''}
+        ${(()=>{
+          const st = state.students.find(s => s.name.trim().toLowerCase()===r.studentName.trim().toLowerCase());
+          return st && st.phone ? `<button class="record-whatsapp" data-id="${r.id}">${iconWhatsappSvg()} إرسال لولي الأمر</button>` : '';
+        })()}
         ${canEditTeacher && !isEditingTeacher ? `<button class="record-edit-teacher" data-id="${r.id}">تعديل المحفّظ</button>` : ''}
         ${state.currentRole!=='teacher' ? `<button class="record-del" data-id="${r.id}">حذف السجل</button>` : ''}
       </div>
@@ -2307,6 +2346,9 @@ function attachHistoryHandlers(){
 
   const dailyPdfBtn = document.getElementById('btn-daily-pdf');
   if(dailyPdfBtn) dailyPdfBtn.onclick = ()=> exportDailyResultsPDF(dailyPdfBtn);
+
+  const batchCertsBtn = document.getElementById('btn-batch-certs');
+  if(batchCertsBtn) batchCertsBtn.onclick = ()=> generateBatchCertificates(batchCertsBtn);
 }
 
 function attachDeleteHandlers(){
@@ -2325,6 +2367,17 @@ function attachShareHandlers(){
     b.onclick = ()=>{
       const record = state.exams.find(e=>e.id===b.dataset.id);
       if(record) shareCertificate(record, b);
+    };
+  });
+  document.querySelectorAll('.record-whatsapp').forEach(b=>{
+    b.onclick = ()=>{
+      const record = state.exams.find(e=>e.id===b.dataset.id);
+      if(!record) return;
+      const student = state.students.find(s => s.name.trim().toLowerCase()===record.studentName.trim().toLowerCase());
+      if(!student || !student.phone) return;
+      const phoneDigits = student.phone.replace(/[^\d+]/g, '').replace(/^0+/, '');
+      const msg = generateParentMessage(record, student);
+      window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`, '_blank');
     };
   });
 }
@@ -2641,14 +2694,22 @@ function drawIconCircle(ctx, cx, cy, r, type, bg){
 /* Real uploaded logo artwork, loaded once and cached as an Image so
    canvas drawImage() can use it (falls back to the hand-drawn
    drawLogoMark() if it hasn't loaded yet or fails to load). */
-let _logoImg = null, _logoImgPromise = null;
+let _logoImg = null, _logoImgPromise = null, _logoImgSrc = null;
 function loadLogoImage(){
+  const targetSrc = getCenterSettings().logoDataUri;
+  // If the logo was changed (custom upload swapped in/out), invalidate
+  // the cache so the new artwork actually gets used on canvases drawn
+  // after the change, instead of the old cached Image.
+  if(_logoImgPromise && _logoImgSrc !== targetSrc){
+    _logoImgPromise = null; _logoImg = null;
+  }
   if(_logoImgPromise) return _logoImgPromise;
+  _logoImgSrc = targetSrc;
   _logoImgPromise = new Promise(resolve=>{
     const img = new Image();
     img.onload = ()=>{ _logoImg = img; resolve(img); };
     img.onerror = ()=> resolve(null);
-    img.src = LOGO_DATA_URI;
+    img.src = targetSrc;
   });
   return _logoImgPromise;
 }
@@ -2716,7 +2777,7 @@ function drawHeader(ctx, W, H, brandY, includeSwoosh){
   ctx.direction = 'rtl'; ctx.textAlign = 'center';
   ctx.fillStyle = PAL.green;
   ctx.font = "700 28px 'Amiri', serif";
-  ctx.fillText('مركز السيد هاشم', W/2, brandY);
+  ctx.fillText(getCenterSettings().name, W/2, brandY);
   ctx.font = "500 18px 'Tajawal'";
   ctx.fillText('لتعليم و تحفيظ القرآن الكريم', W/2, brandY+28);
 }
@@ -2759,6 +2820,36 @@ function gradeLabel(score){
   return 'مقبول';
 }
 
+/* Rule-based "smart template" message generator (no AI/API involved —
+   just picks and fills in the right wording from real numbers we
+   already have: score, deduction counts, retry status). Used for the
+   WhatsApp message sent to a parent about one exam result. */
+function generateParentMessage(record, student){
+  const isRetry = !!record.stoppedEarly;
+  const juzText = formatJuzRange(record.juz);
+  const d = new Date(record.date).toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
+  const header = `${getCenterSettings().fullName}\nالطالب: ${record.studentName}\nالتاريخ: ${d}`;
+
+  if(isRetry){
+    return `${header}\n\nنحيطكم علماً أن الطالب لم يُكمل اختبار ${juzText} هذه المرة، وسيُعاد الاختبار لاحقاً بعد مزيد من المراجعة. نشكر تعاونكم ومتابعتكم مع الطالب في البيت.`;
+  }
+
+  const heavyLahn = record.deductions.lahn > 2;
+  const manyKhataa = record.deductions.khataa > 3;
+
+  if(record.score >= 95){
+    return `${header}\n\nالحمدلله، اجتاز الطالب اختبار ${juzText} بتفوّق وامتياز (${record.score}/100 — ${gradeLabel(record.score)}). بارك الله فيه وفي جهده وجهدكم معه، ونسأل الله أن يجعله من أهل القرآن.`;
+  }
+  if(record.score >= 80){
+    if(heavyLahn || manyKhataa){
+      return `${header}\n\nاجتاز الطالب اختبار ${juzText} بعلامة ${record.score}/100 (${gradeLabel(record.score)}). لوحظ بعض اللحن والأخطاء أثناء التسميع، فنرجو المتابعة معه بمراجعة أحكام التلاوة قبل الاختبار القادم حتى يثبت الحفظ أكتر.`;
+    }
+    return `${header}\n\nالحمدلله، اجتاز الطالب اختبار ${juzText} بنجاح (${record.score}/100 — ${gradeLabel(record.score)}). أداء جيد، وبانتظار الجزء القادم بإذن الله.`;
+  }
+  // score < 80 — did not pass
+  return `${header}\n\nنأسف لإبلاغكم أن الطالب لم يجتز اختبار ${juzText} هذه المرة (${record.score}/100). يُرجى مراجعة الحفظ معه بشكل إضافي، وبإمكانه إعادة التقديم بعد أسبوع من تاريخ هذا الاختبار إن شاء الله.`;
+}
+
 /* ---------------- CERTIFICATE (شهادة اجتياز) ---------------- */
 async function drawCertificate(record){
   await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
@@ -2785,7 +2876,7 @@ async function drawCertificate(record){
   // "تشهد إدارة ..." — the word "إدارة" specifically drawn bold, rest at
   // normal weight, reconstructed in correct RTL reading order.
   (function(){
-    const before = 'تشهد ', boldWord = 'إدارة', after = ' مركز السيد هاشم لتعليم وتحفيظ القرآن الكريم بأن الطالب';
+    const before = 'تشهد ', boldWord = 'إدارة', after = ' ' + getCenterSettings().fullName + ' بأن الطالب';
     const normalFont = "500 29px 'Tajawal'", boldFont = "800 29px 'Tajawal'";
     ctx.textAlign = 'left';
     ctx.font = normalFont; const wBefore = ctx.measureText(before).width;
@@ -2862,7 +2953,7 @@ async function drawCertificate(record){
   const issueDateStr = new Date().toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
   footerCol(W-175, 'تاريخ إصدار الشهادة:', issueDateStr);
   footerCol(W-560, 'اسم المحفّظ:', record.teacherName || '—');
-  footerCol(560, 'مدير المركز:', CENTER_DIRECTOR_NAME);
+  footerCol(560, 'مدير المركز:', getCenterSettings().directorName);
   footerCol(175, 'اسم المختبِر:', record.testerName);
 
   return canvas;
@@ -2946,7 +3037,7 @@ async function drawProgressCertificate(student){
 
   ctx.fillStyle = PAL.ink;
   ctx.font = "500 25px 'Tajawal'";
-  ctx.fillText('تشهد إدارة مركز السيد هاشم لتعليم وتحفيظ القرآن الكريم بأن الطالب', W/2, 425);
+  ctx.fillText('تشهد إدارة ' + getCenterSettings().fullName + ' بأن الطالب', W/2, 425);
 
   ctx.fillStyle = PAL.green;
   ctx.font = "700 50px 'Amiri', serif";
@@ -3266,7 +3357,7 @@ async function generateMonthlyReport(btnEl, period){
     const title = period==='year' ? 'التقرير السنوي' : 'التقرير الشهري';
 
     if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' لمركز السيد هاشم' });
+      await navigator.share({ files:[file], title, text: title + ' لـ' + getCenterSettings().name });
     } else {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -3423,7 +3514,7 @@ async function exportDailyResults(btnEl){
     const title = 'نتائج اختبارات اليوم';
 
     if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' — مركز السيد هاشم' });
+      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
     } else {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -3445,6 +3536,66 @@ async function exportDailyResults(btnEl){
 /* Same daily results report, exported as a one-page PDF instead of a
    PNG — some people prefer sending/printing a PDF. Reuses the exact
    same canvas drawing; only the export format differs. */
+/* Batch certificate generation — one combined PDF with one page per
+   eligible exam (passed, not a retry) within the chosen month. Reuses
+   the exact same drawCertificate() used for individual shares, so the
+   design always stays in sync automatically. */
+async function generateBatchCertificatesPDF(monthStr, btnEl){
+  if(btnEl) btnEl.disabled = true;
+  const errEl = document.getElementById('batch-cert-error');
+  if(errEl) errEl.textContent = '';
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
+      return;
+    }
+    if(!monthStr){ if(errEl) errEl.textContent = 'اختر الشهر أولاً'; return; }
+    const eligible = visibleExams()
+      .filter(e => !e.stoppedEarly && e.score >= 80 && e.date.slice(0,7) === monthStr)
+      .sort((a,b)=> a.studentName.localeCompare(b.studentName, 'ar'));
+    if(eligible.length === 0){
+      showToast('ما في شهادات مستحقة خلال هذا الشهر');
+      return;
+    }
+    showToast(`جاري توليد ${eligible.length} شهادة...`);
+    const { jsPDF } = window.jspdf;
+    let pdf = null;
+    for(let i=0; i<eligible.length; i++){
+      const canvas = await drawCertificate(eligible[i]);
+      const imgData = canvas.toDataURL('image/png');
+      if(!pdf){
+        pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height] });
+      } else {
+        pdf.addPage([canvas.width, canvas.height], 'l');
+      }
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    }
+    const [year, month] = monthStr.split('-');
+    const fileName = `شهادات-${year}-${month}.pdf`;
+    const blob = pdf.output('blob');
+    const file = new File([blob], fileName, { type:'application/pdf' });
+    const title = `شهادات شهر ${month}/${year}`;
+
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast(`تم توليد ${eligible.length} شهادة بملف واحد`);
+    }
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      console.error(e);
+      showToast('تعذّر توليد الشهادات، حاول مرة ثانية');
+    }
+  }finally{
+    if(btnEl) btnEl.disabled = false;
+  }
+}
+
 async function exportDailyResultsPDF(btnEl){
   if(btnEl) btnEl.disabled = true;
   try{
@@ -3469,7 +3620,7 @@ async function exportDailyResultsPDF(btnEl){
     const title = 'نتائج اختبارات اليوم';
 
     if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' — مركز السيد هاشم' });
+      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
     } else {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -3482,6 +3633,69 @@ async function exportDailyResultsPDF(btnEl){
     if(e && e.name !== 'AbortError'){
       console.error(e);
       showToast('تعذّر إصدار ملف PDF، حاول مرة ثانية');
+    }
+  }finally{
+    if(btnEl) btnEl.disabled = false;
+  }
+}
+
+/* Builds one combined PDF with every passing certificate (score >= 80,
+   not a stopped-early retry) for the current calendar month — instead
+   of generating and sharing them one by one. Respects the same
+   role-based scoping as the rest of history (a teacher only gets their
+   own students' certificates). */
+async function generateBatchCertificates(btnEl){
+  if(btnEl) btnEl.disabled = true;
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
+      return;
+    }
+    const now = new Date();
+    const monthPrefix = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+    const monthExams = visibleExams()
+      .filter(e => !e.stoppedEarly && e.score >= 80 && e.date.startsWith(monthPrefix))
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+
+    if(monthExams.length === 0){
+      showToast('لا توجد شهادات اجتياز مسجّلة هذا الشهر بعد');
+      return;
+    }
+
+    showToast(`جاري توليد ${monthExams.length} شهادة، ممكن ياخد شوي...`);
+    const { jsPDF } = window.jspdf;
+    let pdf = null;
+    for(let i=0; i<monthExams.length; i++){
+      const canvas = await drawCertificate(monthExams[i]);
+      const imgData = canvas.toDataURL('image/png');
+      if(!pdf){
+        pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height] });
+      } else {
+        pdf.addPage([canvas.width, canvas.height], 'l');
+      }
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    }
+
+    const monthLabel = now.toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
+    const fileName = `شهادات-${monthPrefix}.pdf`;
+    const blob = pdf.output('blob');
+    const file = new File([blob], fileName, { type:'application/pdf' });
+    const title = `شهادات ${monthLabel} (${monthExams.length} شهادة)`;
+
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast(`تم حفظ ${monthExams.length} شهادة بملف PDF واحد`);
+    }
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      console.error(e);
+      showToast('تعذّر توليد الشهادات، حاول مرة ثانية');
     }
   }finally{
     if(btnEl) btnEl.disabled = false;
@@ -4611,13 +4825,9 @@ function attachStudentDetailHandlers(){
       .filter(e => e.studentName.trim().toLowerCase()===student.name.trim().toLowerCase())
       .sort((a,b)=> new Date(b.date)-new Date(a.date))[0];
     const phoneDigits = student.phone.replace(/[^\d+]/g, '').replace(/^0+/, '');
-    let msg = `مركز السيد هاشم لتعليم و تحفيظ القرآن الكريم\nنتيجة اختبار الطالب ${student.name}`;
-    if(lastExam){
-      const d = new Date(lastExam.date).toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
-      msg += `\nالأجزاء: ${formatJuzRange(lastExam.juz)}\nالدرجة: ${lastExam.score}/100\nالتاريخ: ${d}`;
-    } else {
-      msg += `\nالتقدّم التراكمي: ${student.juzProgress.length}/30 جزء`;
-    }
+    const msg = lastExam
+      ? generateParentMessage(lastExam, student)
+      : `${getCenterSettings().fullName}\nالطالب: ${student.name}\nالتقدّم التراكمي: ${student.juzProgress.length}/30 جزء`;
     window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
@@ -4657,6 +4867,51 @@ function settingsView(){
       `;
     })() : ''}
   </div>
+
+  ${isAdmin ? `
+  <div class="settings-block">
+    <h3>هوية المركز</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">هاي القيم بتظهر بالشهادات، الرسائل، وصفحة الدخول — عدّلها لتخصيص البرنامج لمركزك.</p>
+    <div class="field">
+      <label>الاسم المختصر</label>
+      <input type="text" id="cs-name" placeholder="${escapeHtml(CENTER_NAME_DEFAULT)}" value="${escapeHtml(getCenterSettings().name)}">
+    </div>
+    <div class="field">
+      <label>الاسم الكامل</label>
+      <input type="text" id="cs-fullname" placeholder="${escapeHtml(CENTER_FULLNAME_DEFAULT)}" value="${escapeHtml(getCenterSettings().fullName)}">
+    </div>
+    <div class="field">
+      <label>الشعار الفرعي</label>
+      <input type="text" id="cs-tagline" placeholder="${escapeHtml(CENTER_TAGLINE_DEFAULT)}" value="${escapeHtml(getCenterSettings().tagline)}">
+    </div>
+    <div class="field">
+      <label>اسم مدير المركز</label>
+      <input type="text" id="cs-director" placeholder="${escapeHtml(CENTER_DIRECTOR_NAME)}" value="${escapeHtml(getCenterSettings().directorName)}">
+    </div>
+    <div class="field">
+      <label>شعار المركز (صورة)</label>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <img id="cs-logo-preview" src="${getCenterSettings().logoDataUri}" style="width:56px; height:56px; object-fit:contain; border:1px solid var(--line); border-radius:10px; background:#fff;">
+        <button class="ghost" id="btn-cs-logo-trigger">تغيير الشعار</button>
+        <input type="file" id="cs-logo-file" accept="image/*" style="display:none;">
+      </div>
+      <p style="font-size:11px; color:var(--ink-soft); margin-top:5px;">يفضّل صورة PNG بخلفية شفافة، مربّعة الشكل تقريباً.</p>
+    </div>
+    <button class="btn btn-primary" id="btn-save-center-settings" style="margin-top:6px;">حفظ هوية المركز</button>
+  </div>
+  ` : ''}
+
+  ${(isAdmin || state.currentRole==='examiner') ? `
+  <div class="settings-block">
+    <h3>توليد شهادات دفعة واحدة</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">بيولّد ملف PDF واحد فيه شهادة لكل طالب اجتاز خلال الشهر المحدّد (بدون سجلات "إعادة" أو علامات أقل من 80).</p>
+    <div class="field">
+      <input type="month" id="batch-cert-month" value="${currentYearMonth()}">
+    </div>
+    <div id="batch-cert-error" style="font-size:12px; color:var(--red); margin-bottom:8px;"></div>
+    <button class="btn btn-primary" id="btn-generate-batch-certs">توليد شهادات الشهر</button>
+  </div>
+  ` : ''}
 
   ${(isAdmin || state.currentRole==='examiner') ? `
   <div class="settings-block">
@@ -4809,6 +5064,50 @@ function settingsView(){
 function attachSettingsHandlers(){
   const themeBtn = document.getElementById('btn-toggle-theme');
   if(themeBtn) themeBtn.onclick = toggleTheme;
+
+  const csLogoTrigger = document.getElementById('btn-cs-logo-trigger');
+  const csLogoFile = document.getElementById('cs-logo-file');
+  let pendingLogoDataUri = null;
+  if(csLogoTrigger && csLogoFile){
+    csLogoTrigger.onclick = ()=> csLogoFile.click();
+    csLogoFile.onchange = ()=>{
+      const file = csLogoFile.files[0];
+      if(!file) return;
+      if(file.size > 1024*1024){ showToast('الصورة كبيرة كتير — اختر صورة أصغر من 1 ميغابايت'); return; }
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        pendingLogoDataUri = reader.result;
+        const preview = document.getElementById('cs-logo-preview');
+        if(preview) preview.src = pendingLogoDataUri;
+      };
+      reader.readAsDataURL(file);
+    };
+  }
+
+  const saveCenterBtn = document.getElementById('btn-save-center-settings');
+  if(saveCenterBtn) saveCenterBtn.onclick = async ()=>{
+    const name = document.getElementById('cs-name').value.trim();
+    const fullName = document.getElementById('cs-fullname').value.trim();
+    const tagline = document.getElementById('cs-tagline').value.trim();
+    const directorName = document.getElementById('cs-director').value.trim();
+    state.centerSettings = {
+      ...(state.centerSettings || {}),
+      name: name || undefined,
+      fullName: fullName || undefined,
+      tagline: tagline || undefined,
+      directorName: directorName || undefined,
+      logoDataUri: pendingLogoDataUri || (state.centerSettings && state.centerSettings.logoDataUri) || undefined,
+    };
+    await saveCenterSettings();
+    showToast('تم حفظ هوية المركز');
+    render();
+  };
+
+  const genBatchBtn = document.getElementById('btn-generate-batch-certs');
+  if(genBatchBtn) genBatchBtn.onclick = ()=>{
+    const monthInput = document.getElementById('batch-cert-month');
+    generateBatchCertificatesPDF(monthInput ? monthInput.value : '', genBatchBtn);
+  };
 
   const sendNotifBtn = document.getElementById('btn-send-notif');
   if(sendNotifBtn) sendNotifBtn.onclick = async ()=>{
@@ -5235,14 +5534,39 @@ window.addEventListener('offline', ()=>{
 window.addEventListener('online', ()=>{
   showToast('رجع الاتصال بالإنترنت — جاري رفع البيانات المحفوظة');
   flushPendingSync();
+  updateAppBadge();
 });
+
+/* App icon badge (installed PWA only, on browsers that support the
+   Badging API): shows the number of not-yet-synced items on the app
+   icon itself when there's anything pending (most urgent signal), or
+   otherwise today's remaining appointment count — so someone can tell
+   at a glance, without even opening the app, whether data needs
+   attention or how many students are booked today. Falls back to
+   doing nothing where the API isn't available (iOS Safari, etc). */
+function updateAppBadge(){
+  if(!('setAppBadge' in navigator)) return;
+  try{
+    const pending = getPendingSyncKeys().length;
+    if(pending > 0){
+      navigator.setAppBadge(pending).catch(()=>{});
+      return;
+    }
+    const todayStr = todayStamp();
+    const todayCount = state.schedule ? state.schedule.filter(s => !s.done && s.date === todayStr).length : 0;
+    if(todayCount > 0) navigator.setAppBadge(todayCount).catch(()=>{});
+    else navigator.clearAppBadge().catch(()=>{});
+  }catch(e){}
+}
 
 /* Keep the sync-status badge in the topbar live (pending count changes
    asynchronously as writes/flushes resolve, with nothing else in the
    UI necessarily triggering a re-render at that moment). */
+updateAppBadge();
 setInterval(()=>{
   const badge = document.getElementById('sync-status-badge');
   if(badge && state.currentUser) badge.outerHTML = syncStatusBadge();
+  updateAppBadge();
 }, 4000);
 
 /* Register the service worker so the app shell (this page's HTML/CSS/JS,
