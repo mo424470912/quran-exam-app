@@ -3561,8 +3561,14 @@ async function generateBatchCertificatesPDF(monthStr, btnEl){
     const { jsPDF } = window.jspdf;
     let pdf = null;
     let failedCount = 0;
+    const startedAt = Date.now();
     for(let i=0; i<eligible.length; i++){
-      if(i>0 && i%5===0) showToast(`جاري توليد الشهادة ${i+1} من ${eligible.length}...`);
+      showToast(`جاري توليد الشهادة ${i+1} من ${eligible.length}...`);
+      // Yield to the browser between certificates so it actually gets a
+      // chance to paint that progress toast and stay responsive, instead
+      // of running all the canvas work back-to-back on one long block
+      // that can look like a frozen/blank screen on a slower phone.
+      await new Promise(r => setTimeout(r, 0));
       let canvas;
       try{
         // A stuck font load or image decode should not freeze the whole
@@ -3575,37 +3581,42 @@ async function generateBatchCertificatesPDF(monthStr, btnEl){
         failedCount++;
         continue;
       }
-      const imgData = canvas.toDataURL('image/png');
+      // JPEG instead of PNG: certificates have no transparency to lose,
+      // and this cuts file size drastically (often 5-10x smaller) —
+      // important for a multi-page batch PDF on a mobile connection,
+      // where a huge PNG-based file is the most likely reason nothing
+      // seems to happen after "جاري توليد".
+      const imgData = canvas.toDataURL('image/jpeg', 0.85);
       if(!pdf){
-        pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height] });
+        pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height], compress: true });
       } else {
         pdf.addPage([canvas.width, canvas.height], 'l');
       }
-      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
     }
     if(!pdf){
       showToast('تعذّر توليد أي شهادة — جرّب مرة ثانية أو تحقّق من الاتصال');
       return;
     }
     const successCount = eligible.length - failedCount;
+    const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+    showToast(`جاري تجهيز الملف (${elapsedSec} ثانية)...`);
     const [year, month] = monthStr.split('-');
     const fileName = `شهادات-${year}-${month}.pdf`;
     const blob = pdf.output('blob');
-    const file = new File([blob], fileName, { type:'application/pdf' });
-    const title = `شهادات شهر ${month}/${year}`;
 
-    if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fileName;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      showToast(failedCount>0
-        ? `تم توليد ${successCount} من ${eligible.length} شهادة (تعذّر توليد ${failedCount})`
-        : `تم توليد ${successCount} شهادة بملف واحد`);
-    }
+    // Batch PDFs can get large (many pages) — handing a large file to
+    // the OS share sheet is the more failure-prone path on mobile
+    // (can silently do nothing on some devices/browsers), so batches
+    // always go straight to a direct download instead of navigator.share.
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 30000);
+    showToast(failedCount>0
+      ? `تم توليد ${successCount} من ${eligible.length} شهادة (تعذّر توليد ${failedCount}) — تحقّق من مجلد التنزيلات`
+      : `تم توليد ${successCount} شهادة بملف واحد — تحقّق من مجلد التنزيلات`);
   }catch(e){
     if(e && e.name !== 'AbortError'){
       console.error(e);
