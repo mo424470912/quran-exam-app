@@ -2348,7 +2348,7 @@ function attachHistoryHandlers(){
   if(dailyPdfBtn) dailyPdfBtn.onclick = ()=> exportDailyResultsPDF(dailyPdfBtn);
 
   const batchCertsBtn = document.getElementById('btn-batch-certs');
-  if(batchCertsBtn) batchCertsBtn.onclick = ()=> generateBatchCertificates(batchCertsBtn);
+  if(batchCertsBtn) batchCertsBtn.onclick = ()=> generateBatchCertificatesPDF(currentYearMonth(), batchCertsBtn);
 }
 
 function attachDeleteHandlers(){
@@ -3560,8 +3560,21 @@ async function generateBatchCertificatesPDF(monthStr, btnEl){
     showToast(`جاري توليد ${eligible.length} شهادة...`);
     const { jsPDF } = window.jspdf;
     let pdf = null;
+    let failedCount = 0;
     for(let i=0; i<eligible.length; i++){
-      const canvas = await drawCertificate(eligible[i]);
+      if(i>0 && i%5===0) showToast(`جاري توليد الشهادة ${i+1} من ${eligible.length}...`);
+      let canvas;
+      try{
+        // A stuck font load or image decode should not freeze the whole
+        // batch forever — skip that one certificate and keep going
+        // rather than leaving the person staring at "جاري توليد" with
+        // no feedback and no result.
+        canvas = await withTimeout(drawCertificate(eligible[i]), 15000);
+      }catch(e){
+        console.warn('تعذّر توليد شهادة الطالب', eligible[i].studentName, e);
+        failedCount++;
+        continue;
+      }
       const imgData = canvas.toDataURL('image/png');
       if(!pdf){
         pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height] });
@@ -3570,6 +3583,11 @@ async function generateBatchCertificatesPDF(monthStr, btnEl){
       }
       pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
     }
+    if(!pdf){
+      showToast('تعذّر توليد أي شهادة — جرّب مرة ثانية أو تحقّق من الاتصال');
+      return;
+    }
+    const successCount = eligible.length - failedCount;
     const [year, month] = monthStr.split('-');
     const fileName = `شهادات-${year}-${month}.pdf`;
     const blob = pdf.output('blob');
@@ -3584,7 +3602,9 @@ async function generateBatchCertificatesPDF(monthStr, btnEl){
       a.href = url; a.download = fileName;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      showToast(`تم توليد ${eligible.length} شهادة بملف واحد`);
+      showToast(failedCount>0
+        ? `تم توليد ${successCount} من ${eligible.length} شهادة (تعذّر توليد ${failedCount})`
+        : `تم توليد ${successCount} شهادة بملف واحد`);
     }
   }catch(e){
     if(e && e.name !== 'AbortError'){
@@ -3639,68 +3659,6 @@ async function exportDailyResultsPDF(btnEl){
   }
 }
 
-/* Builds one combined PDF with every passing certificate (score >= 80,
-   not a stopped-early retry) for the current calendar month — instead
-   of generating and sharing them one by one. Respects the same
-   role-based scoping as the rest of history (a teacher only gets their
-   own students' certificates). */
-async function generateBatchCertificates(btnEl){
-  if(btnEl) btnEl.disabled = true;
-  try{
-    if(!window.jspdf || !window.jspdf.jsPDF){
-      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
-      return;
-    }
-    const now = new Date();
-    const monthPrefix = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
-    const monthExams = visibleExams()
-      .filter(e => !e.stoppedEarly && e.score >= 80 && e.date.startsWith(monthPrefix))
-      .sort((a,b) => new Date(a.date) - new Date(b.date));
-
-    if(monthExams.length === 0){
-      showToast('لا توجد شهادات اجتياز مسجّلة هذا الشهر بعد');
-      return;
-    }
-
-    showToast(`جاري توليد ${monthExams.length} شهادة، ممكن ياخد شوي...`);
-    const { jsPDF } = window.jspdf;
-    let pdf = null;
-    for(let i=0; i<monthExams.length; i++){
-      const canvas = await drawCertificate(monthExams[i]);
-      const imgData = canvas.toDataURL('image/png');
-      if(!pdf){
-        pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height] });
-      } else {
-        pdf.addPage([canvas.width, canvas.height], 'l');
-      }
-      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-    }
-
-    const monthLabel = now.toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
-    const fileName = `شهادات-${monthPrefix}.pdf`;
-    const blob = pdf.output('blob');
-    const file = new File([blob], fileName, { type:'application/pdf' });
-    const title = `شهادات ${monthLabel} (${monthExams.length} شهادة)`;
-
-    if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fileName;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      showToast(`تم حفظ ${monthExams.length} شهادة بملف PDF واحد`);
-    }
-  }catch(e){
-    if(e && e.name !== 'AbortError'){
-      console.error(e);
-      showToast('تعذّر توليد الشهادات، حاول مرة ثانية');
-    }
-  }finally{
-    if(btnEl) btnEl.disabled = false;
-  }
-}
 
 /* ---------------- STATS VIEW ---------------- */
 /* ---------------- DASHBOARD (نظرة عامة) — admin/examiner landing page ---------------- */
