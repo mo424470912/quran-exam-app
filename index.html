@@ -639,12 +639,14 @@ function markPendingSync(key){
     const keys = getPendingSyncKeys();
     if(!keys.includes(key)){ keys.push(key); localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(keys)); }
   }catch(e){}
+  updateAppBadge();
 }
 function clearPendingSync(key){
   try{
     const keys = getPendingSyncKeys().filter(k => k !== key);
     localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(keys));
   }catch(e){}
+  updateAppBadge();
 }
 let flushingPendingSync = false;
 async function flushPendingSync(){
@@ -5063,6 +5065,20 @@ function settingsView(){
   </div>
 
   <div class="settings-block">
+    <h3>رمز أيقونة التطبيق</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">
+      حالة الدعم على هذا المتصفح/الجهاز: ${'setAppBadge' in navigator
+        ? '<span style="color:var(--green); font-weight:700;">مدعوم ✅</span>'
+        : '<span style="color:var(--red); font-weight:700;">غير مدعوم على هذا المتصفح ❌ (شائع على آيفون / بعض متصفحات الأندرويد)</span>'}
+    </p>
+    ${'setAppBadge' in navigator ? `
+    <button class="btn btn-ghost" id="btn-test-badge">جرّب وضع رقم 3 على الأيقونة الآن</button>
+    <button class="link-btn" id="btn-clear-badge" style="margin-top:8px;">إزالة الرقم</button>
+    <p style="font-size:11px; color:var(--ink-soft); margin-top:6px;">دوس الزر، وبعدين اطلع من التطبيق (مو بس ترجع للخلف — اقفله فعلياً) وشوف أيقونته على الشاشة الرئيسية.</p>
+    ` : ''}
+  </div>
+
+  <div class="settings-block">
     <h3>تغيير كلمة المرور</h3>
     <div class="field"><input type="password" id="new-pass" placeholder="كلمة المرور الجديدة"></div>
     <button class="btn btn-ghost" id="btn-change-pass">تحديث كلمة المرور</button>
@@ -5178,6 +5194,17 @@ function settingsView(){
 function attachSettingsHandlers(){
   const themeBtn = document.getElementById('btn-toggle-theme');
   if(themeBtn) themeBtn.onclick = toggleTheme;
+
+  const testBadgeBtn = document.getElementById('btn-test-badge');
+  if(testBadgeBtn) testBadgeBtn.onclick = ()=>{
+    navigator.setAppBadge(3)
+      .then(()=> showToast('تم — دوس زر الرجوع واقفل التطبيق وشوف الأيقونة'))
+      .catch(err => showToast('تعذّر تفعيل البادج: ' + (err && err.message ? err.message : 'خطأ غير معروف')));
+  };
+  const clearBadgeBtn = document.getElementById('btn-clear-badge');
+  if(clearBadgeBtn) clearBadgeBtn.onclick = ()=>{
+    navigator.clearAppBadge().then(()=> showToast('تم مسح الرقم')).catch(()=>{});
+  };
 
   const csLogoTrigger = document.getElementById('btn-cs-logo-trigger');
   const csLogoFile = document.getElementById('cs-logo-file');
