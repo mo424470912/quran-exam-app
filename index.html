@@ -4932,6 +4932,7 @@ function attachStudentDetailHandlers(){
 
 /* ---------------- SETTINGS VIEW ---------------- */
 const roleLabel = { admin: 'مدير', examiner: 'مختبِر', teacher: 'محفّظ' };
+let centerSettingsExpanded = false;
 
 function settingsView(){
   const isAdmin = state.currentRole === 'admin';
@@ -4964,7 +4965,8 @@ function settingsView(){
   ${isAdmin ? `
   <div class="settings-block">
     <h3>هوية المركز</h3>
-    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">هاي القيم بتظهر بالشهادات، الرسائل، وصفحة الدخول — عدّلها لتخصيص البرنامج لمركزك.</p>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">الاسم، الشعار، ومدير المركز يلي بيظهروا بالشهادات والرسائل وصفحة الدخول.</p>
+    ${centerSettingsExpanded ? `
     <div class="field">
       <label>الاسم المختصر</label>
       <input type="text" id="cs-name" placeholder="${escapeHtml(CENTER_NAME_DEFAULT)}" value="${escapeHtml(getCenterSettings().name)}">
@@ -4990,7 +4992,13 @@ function settingsView(){
       </div>
       <p style="font-size:11px; color:var(--ink-soft); margin-top:5px;">يفضّل صورة PNG بخلفية شفافة، مربّعة الشكل تقريباً.</p>
     </div>
-    <button class="btn btn-primary" id="btn-save-center-settings" style="margin-top:6px;">حفظ هوية المركز</button>
+    <div class="data-btn-row">
+      <button class="btn btn-primary" id="btn-save-center-settings">حفظ هوية المركز</button>
+      <button class="ghost" id="btn-collapse-center-settings">إخفاء</button>
+    </div>
+    ` : `
+    <button class="btn btn-ghost" id="btn-toggle-center-settings">تغيير هوية المركز</button>
+    `}
   </div>
   ` : ''}
 
@@ -5206,6 +5214,11 @@ function attachSettingsHandlers(){
     navigator.clearAppBadge().then(()=> showToast('تم مسح الرقم')).catch(()=>{});
   };
 
+  const toggleCenterBtn = document.getElementById('btn-toggle-center-settings');
+  if(toggleCenterBtn) toggleCenterBtn.onclick = ()=>{ centerSettingsExpanded = true; render(); };
+  const collapseCenterBtn = document.getElementById('btn-collapse-center-settings');
+  if(collapseCenterBtn) collapseCenterBtn.onclick = ()=>{ centerSettingsExpanded = false; render(); };
+
   const csLogoTrigger = document.getElementById('btn-cs-logo-trigger');
   const csLogoFile = document.getElementById('cs-logo-file');
   let pendingLogoDataUri = null;
@@ -5241,6 +5254,7 @@ function attachSettingsHandlers(){
     };
     await saveCenterSettings();
     showToast('تم حفظ هوية المركز');
+    centerSettingsExpanded = false;
     render();
   };
 
