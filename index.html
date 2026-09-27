@@ -582,15 +582,27 @@ function withTimeout(promise, ms){
 const storageAdapter = {
   async get(key){
     if (firestoreDb) {
-      try{
-        const doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get(), 5000);
-        if(doc.exists){
-          try{ localStorage.setItem(key, doc.data().value); }catch(e){}
-          return { value: doc.data().value };
+      // A slow-but-real connection (weak wifi, just-installed app on first
+      // sync) isn't the same as being offline, and the exams/students
+      // documents can be sizeable — give it a more generous timeout, and
+      // retry once before falling back to (possibly empty, on a brand
+      // new install) local data. This is what fixes "opens with all
+      // zeros right after installing the app icon, but works fine from
+      // the browser" — that gap is almost always just a slow first read
+      // that gave up too early, not actually missing data.
+      for(let attempt=1; attempt<=2; attempt++){
+        try{
+          const doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get(), 12000);
+          if(doc.exists){
+            try{ localStorage.setItem(key, doc.data().value); }catch(e){}
+            return { value: doc.data().value };
+          }
+          return null;
+        }catch(e){
+          if(attempt===2){
+            console.warn('تعذّر الوصول لـ Firestore (غالباً بسبب انقطاع الإنترنت)، استخدام آخر نسخة محفوظة محلياً', e);
+          }
         }
-        return null;
-      }catch(e){
-        console.warn('تعذّر الوصول لـ Firestore (غالباً بسبب انقطاع الإنترنت)، استخدام آخر نسخة محفوظة محلياً', e);
       }
     }
     if (window.storage && typeof window.storage.get === 'function') {
@@ -1141,11 +1153,17 @@ function deleteManualBackup(key){
    passed (score >= 80) — marks the tested juz as memorized in that
    student's cumulative progress checklist. Called right after an
    exam is saved. */
+let _studentIdCounter = 0;
+function makeStudentId(){
+  _studentIdCounter++;
+  return 'st_' + Date.now() + '_' + _studentIdCounter;
+}
+
 function upsertStudentFromExam(record){
   const key = record.studentName.trim();
   let student = state.students.find(s => s.name.trim().toLowerCase() === key.toLowerCase());
   if(!student){
-    student = { id: 'st_' + Date.now(), name: key, phone: '', notes: '', juzProgress: [], createdAt: new Date().toISOString() };
+    student = { id: makeStudentId(), name: key, phone: '', notes: '', juzProgress: [], createdAt: new Date().toISOString() };
     state.students.push(student);
   }
   if(!record.stoppedEarly && record.score >= 80){
@@ -1167,7 +1185,7 @@ function upsertStudentFromMemorization(record){
   const key = record.studentName.trim();
   let student = state.students.find(s => s.name.trim().toLowerCase() === key.toLowerCase());
   if(!student){
-    student = { id: 'st_' + Date.now(), name: key, phone: '', notes: '', juzProgress: [], createdAt: new Date().toISOString() };
+    student = { id: makeStudentId(), name: key, phone: '', notes: '', juzProgress: [], createdAt: new Date().toISOString() };
     state.students.push(student);
   }
   return student;
@@ -1807,6 +1825,7 @@ const TEACHERS = [
   'محمد ابو عبدو',
   'محمد صبرة',
   'سعيد الصفدي',
+  'عبدالله برغوت',
 ];
 
 const CENTER_DIRECTOR_NAME = 'مشعل نصر مطر'; // default, used until an admin customizes it in Settings
@@ -1929,6 +1948,80 @@ function testSetupView(){
 }
 
 /* ---- Stage 2: scoring / deductions for the started test ---- */
+/* On-screen Mushaf text for the juz being tested — so the examiner can
+   follow along and prompt the student without needing a physical
+   Mushaf. Fetched once per juz from the public alquran.cloud API and
+   cached in localStorage afterward, so it keeps working offline for
+   every juz that's ever been opened before. */
+let quranPanelOpen = false;
+let quranPanelActiveJuz = null;
+let quranPanelData = {}; // juzNumber -> { ayahs } | { error }
+let quranPanelLoading = false;
+
+async function loadJuzQuranText(juzNum){
+  if(quranPanelData[juzNum]) return quranPanelData[juzNum];
+  const cacheKey = 'quran_juz_' + juzNum;
+  try{
+    const cached = localStorage.getItem(cacheKey);
+    if(cached){
+      const ayahs = JSON.parse(cached);
+      quranPanelData[juzNum] = { ayahs };
+      return quranPanelData[juzNum];
+    }
+  }catch(e){}
+  try{
+    const res = await fetch(`https://api.alquran.cloud/v1/juz/${juzNum}/quran-uthmani`);
+    if(!res.ok) throw new Error('network');
+    const json = await res.json();
+    const ayahs = (json && json.data && json.data.ayahs) || [];
+    if(!ayahs.length) throw new Error('empty');
+    try{ localStorage.setItem(cacheKey, JSON.stringify(ayahs)); }catch(e){}
+    quranPanelData[juzNum] = { ayahs };
+  }catch(e){
+    quranPanelData[juzNum] = { error: true };
+  }
+  return quranPanelData[juzNum];
+}
+
+function quranTextPanelHTML(){
+  const juzNums = (String(testForm.juz).match(/\d+/g) || []).map(Number);
+  if(!juzNums.length) return '';
+  if(!quranPanelActiveJuz || !juzNums.includes(quranPanelActiveJuz)) quranPanelActiveJuz = juzNums[0];
+  const entry = quranPanelData[quranPanelActiveJuz];
+
+  let body;
+  if(quranPanelLoading && !entry){
+    body = `<div style="text-align:center; padding:30px 0; color:var(--ink-soft); font-size:13px;">جاري تحميل نص الجزء...</div>`;
+  } else if(!entry){
+    body = `<div style="text-align:center; padding:30px 0; color:var(--ink-soft); font-size:13px;">دوس "تحميل" حتى يظهر نص الجزء.</div>`;
+  } else if(entry.error){
+    body = `<div style="text-align:center; padding:20px 0; color:var(--red); font-size:12.5px;">تعذّر تحميل النص — تأكد من الاتصال بالإنترنت أول مرة (بعدها بيضل محفوظ ويشتغل بدون نت).</div>`;
+  } else {
+    let lastSurah = null;
+    body = entry.ayahs.map(a=>{
+      const surahName = a.surah && a.surah.name;
+      const header = surahName && surahName !== lastSurah
+        ? (()=>{ lastSurah = surahName; return `<div style="text-align:center; font-family:'Amiri',serif; font-weight:700; font-size:17px; color:var(--gold); margin:14px 0 8px; padding-bottom:6px; border-bottom:1px solid var(--line);">${escapeHtml(surahName)}</div>`; })()
+        : '';
+      return header + `<span style="font-family:'Amiri',serif; font-size:19px; line-height:2.1; color:var(--ink);">${escapeHtml(a.text)} <span style="font-size:13px; color:var(--gold); font-weight:700;">﴿${a.numberInSurah}﴾</span></span> `;
+    }).join('');
+  }
+
+  return `
+  <div class="settings-block" style="margin-top:4px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+      <h3 style="margin:0;">📖 نص الجزء</h3>
+      ${juzNums.length > 1 ? `
+      <select id="quran-panel-juz-select" style="font-size:12px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink); font-family:'Tajawal';">
+        ${juzNums.map(n=>`<option value="${n}" ${n===quranPanelActiveJuz?'selected':''}>الجزء ${juzOrdinal(n)}</option>`).join('')}
+      </select>` : ''}
+      ${!entry || entry.error ? `<button class="ghost" id="btn-load-quran-text" style="font-size:12px; padding:5px 10px;">تحميل</button>` : ''}
+    </div>
+    <div id="quran-panel-body" style="max-height:340px; overflow-y:auto; text-align:justify; padding:4px 2px; direction:rtl;">${body}</div>
+  </div>
+  `;
+}
+
 function testScoringView(){
   const score = currentScore();
   return `
@@ -1937,6 +2030,11 @@ function testScoringView(){
     <div class="scoring-meta">المحفّظ: <b>${escapeHtml(testForm.teacherName)}</b> · ${escapeHtml(formatJuzRange(testForm.juz))}</div>
     <div class="scoring-meta">⏱ مدة الاختبار: <b id="exam-timer">${formatDuration(elapsedExamSeconds())}</b></div>
   </div>
+
+  <button type="button" id="btn-toggle-quran-panel" class="btn btn-ghost" style="width:100%; margin-bottom:10px;">
+    ${quranPanelOpen ? 'إخفاء نص الجزء 📖' : 'عرض نص الجزء (بدل المصحف) 📖'}
+  </button>
+  ${quranPanelOpen ? quranTextPanelHTML() : ''}
 
   <div class="score-panel">
     <div class="score-num">${score}</div>
@@ -2065,6 +2163,38 @@ function attachTestScoringHandlers(){
 
   const notesEl = document.getElementById('f-scoring-notes');
   if(notesEl) notesEl.oninput = ()=>{ testForm.notes = notesEl.value; saveDraft(); };
+
+  const toggleQuranBtn = document.getElementById('btn-toggle-quran-panel');
+  if(toggleQuranBtn) toggleQuranBtn.onclick = ()=>{
+    quranPanelOpen = !quranPanelOpen;
+    if(quranPanelOpen && !quranPanelActiveJuz){
+      const juzNums = (String(testForm.juz).match(/\d+/g) || []).map(Number);
+      quranPanelActiveJuz = juzNums[0] || null;
+    }
+    if(quranPanelOpen && quranPanelActiveJuz && !quranPanelData[quranPanelActiveJuz]){
+      quranPanelLoading = true;
+      loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
+    }
+    rerenderTestOnly();
+  };
+
+  const quranJuzSelect = document.getElementById('quran-panel-juz-select');
+  if(quranJuzSelect) quranJuzSelect.onchange = ()=>{
+    quranPanelActiveJuz = Number(quranJuzSelect.value);
+    if(!quranPanelData[quranPanelActiveJuz]){
+      quranPanelLoading = true;
+      loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
+    }
+    rerenderTestOnly();
+  };
+
+  const loadQuranBtn = document.getElementById('btn-load-quran-text');
+  if(loadQuranBtn) loadQuranBtn.onclick = ()=>{
+    delete quranPanelData[quranPanelActiveJuz];
+    quranPanelLoading = true;
+    rerenderTestOnly();
+    loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
+  };
 
   document.querySelectorAll('.deduct-btn').forEach(b=>{
     b.onclick = ()=>{
@@ -4320,7 +4450,7 @@ function attachMyStudentsHandlers(){
     if(!name){ if(errEl) errEl.textContent = 'اكتب اسم الطالب'; return; }
     let student = state.students.find(s => s.name.trim().toLowerCase()===name.toLowerCase());
     if(!student){
-      student = { id: 'st_' + Date.now(), name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
+      student = { id: makeStudentId(), name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
       state.students.push(student);
     }
     student.registeredByTeacher = state.currentTeacherLink;
@@ -4539,7 +4669,7 @@ async function importStudentsFromExcel(file){
       let wasNew = false;
       let prevSnapshot = null;
       if(!student){
-        student = { id: 'st_' + Date.now() + '_' + rowNumber, name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
+        student = { id: makeStudentId(), name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
         state.students.push(student);
         added++;
         wasNew = true;
@@ -4759,6 +4889,14 @@ function studentDetailView(){
   })()}
 
   <div class="field">
+    <label>المحفّظ المسؤول</label>
+    <select id="student-teacher-assign">
+      <option value="">تلقائي (حسب سجل الاختبارات/التحفيظ)</option>
+      ${TEACHERS.map(n=>`<option value="${escapeHtml(n)}" ${student.registeredByTeacher===n?'selected':''}>${escapeHtml(n)}</option>`).join('')}
+    </select>
+    <p style="font-size:11px; color:var(--ink-soft); margin-top:5px;">استخدمها لو الطالب مش ظاهر بمجموعة محفّظه الصح بصفحة الطلاب.</p>
+  </div>
+  <div class="field">
     <label>رقم الهوية (اختياري)</label>
     <input type="text" id="student-national-id" placeholder="رقم الهوية" value="${escapeHtml(student.nationalId||'')}">
   </div>
@@ -4881,6 +5019,8 @@ function attachStudentDetailHandlers(){
   if(saveBtn) saveBtn.onclick = async ()=>{
     const student = state.students.find(s => s.id===selectedStudentId);
     if(!student) return;
+    const teacherAssignEl = document.getElementById('student-teacher-assign');
+    if(teacherAssignEl) student.registeredByTeacher = teacherAssignEl.value || null;
     student.nationalId = document.getElementById('student-national-id').value.trim();
     student.birthDate = document.getElementById('student-birth-date').value || null;
     student.phone = document.getElementById('student-phone').value.trim();
