@@ -738,6 +738,24 @@ async function loadAppData(){
     const st = await storageAdapter.get(STORAGE_STUDENTS);
     state.students = st ? JSON.parse(st.value) : [];
   }catch(e){ state.students = []; }
+  // One-time repair: older data may have duplicate student IDs (a past
+  // bug where several students created in the same millisecond during
+  // a bulk import all got the same id). That makes tapping one
+  // student's card silently open a *different* student who happens to
+  // share that id. Reassign a fresh unique id to every duplicate found,
+  // once, and save the fix so it doesn't need to run again.
+  {
+    const seenIds = new Set();
+    let fixedDuplicates = false;
+    state.students.forEach(s=>{
+      if(seenIds.has(s.id)){
+        s.id = makeStudentId();
+        fixedDuplicates = true;
+      }
+      seenIds.add(s.id);
+    });
+    if(fixedDuplicates) await saveStudents();
+  }
   try{
     const sc = await storageAdapter.get(STORAGE_SCHEDULE);
     state.schedule = sc ? JSON.parse(sc.value) : [];
