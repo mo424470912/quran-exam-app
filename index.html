@@ -3247,19 +3247,28 @@ async function drawMonthlyReport(period, monthStr){
     return d.getFullYear()===targetYear && d.getMonth()===targetMonth;
   });
 
+  // Average scores should reflect actual passing performance, not get
+  // dragged down by retakes/fails (score < 80 or stoppedEarly/"إعادة").
+  // "عدد الاختبارات" still counts every attempt (shows real activity),
+  // but "متوسط الدرجة" (both per-student and the overall stat card) is
+  // computed only from exams that passed (score >= 80, not a retry).
   const byStudent = {};
   periodExams.forEach(e=>{
     const key = e.studentName.trim();
+    const isPass = !e.stoppedEarly && e.score >= 80;
     if(!byStudent[key] || new Date(e.date) > new Date(byStudent[key].date)){
       byStudent[key] = { ...byStudent[key], date: e.date, teacherName: e.teacherName };
     }
     byStudent[key].count = (byStudent[key].count||0) + 1;
-    byStudent[key].total = (byStudent[key].total||0) + e.score;
+    if(isPass){
+      byStudent[key].passCount = (byStudent[key].passCount||0) + 1;
+      byStudent[key].passTotal = (byStudent[key].passTotal||0) + e.score;
+    }
   });
   const rows = Object.keys(byStudent)
     .map(name => ({
       name, count: byStudent[name].count,
-      avg: Math.round(byStudent[name].total / byStudent[name].count),
+      avg: byStudent[name].passCount ? Math.round(byStudent[name].passTotal / byStudent[name].passCount) : null,
       teacherName: byStudent[name].teacherName,
       date: byStudent[name].date,
     }))
@@ -3268,7 +3277,8 @@ async function drawMonthlyReport(period, monthStr){
   const maxRows = 14;
   const shownRows = rows.slice(0, maxRows);
   const extra = rows.length - shownRows.length;
-  const avgAll = periodExams.length ? Math.round(periodExams.reduce((s,e)=>s+e.score,0)/periodExams.length) : 0;
+  const passingExams = periodExams.filter(e=> !e.stoppedEarly && e.score >= 80);
+  const avgAll = passingExams.length ? Math.round(passingExams.reduce((s,e)=>s+e.score,0)/passingExams.length) : 0;
 
   const W = 1500;
   const rowH = 58;
@@ -3349,7 +3359,7 @@ async function drawMonthlyReport(period, monthStr){
     ctx.fillRect(tX, y, tW, rowH);
     const d = new Date(row.date);
     const dateStr = d.toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
-    const values = { name:row.name, teacher:row.teacherName, date:dateStr, count:String(row.count), avg:String(row.avg) };
+    const values = { name:row.name, teacher:row.teacherName, date:dateStr, count:String(row.count), avg: row.avg===null ? '—' : String(row.avg) };
     ctx.fillStyle = PAL.ink;
     cols.forEach(col=>{
       ctx.textAlign = 'center';
