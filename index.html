@@ -1966,80 +1966,6 @@ function testSetupView(){
 }
 
 /* ---- Stage 2: scoring / deductions for the started test ---- */
-/* On-screen Mushaf text for the juz being tested — so the examiner can
-   follow along and prompt the student without needing a physical
-   Mushaf. Fetched once per juz from the public alquran.cloud API and
-   cached in localStorage afterward, so it keeps working offline for
-   every juz that's ever been opened before. */
-let quranPanelOpen = false;
-let quranPanelActiveJuz = null;
-let quranPanelData = {}; // juzNumber -> { ayahs } | { error }
-let quranPanelLoading = false;
-
-async function loadJuzQuranText(juzNum){
-  if(quranPanelData[juzNum]) return quranPanelData[juzNum];
-  const cacheKey = 'quran_juz_' + juzNum;
-  try{
-    const cached = localStorage.getItem(cacheKey);
-    if(cached){
-      const ayahs = JSON.parse(cached);
-      quranPanelData[juzNum] = { ayahs };
-      return quranPanelData[juzNum];
-    }
-  }catch(e){}
-  try{
-    const res = await fetch(`https://api.alquran.cloud/v1/juz/${juzNum}/quran-uthmani`);
-    if(!res.ok) throw new Error('network');
-    const json = await res.json();
-    const ayahs = (json && json.data && json.data.ayahs) || [];
-    if(!ayahs.length) throw new Error('empty');
-    try{ localStorage.setItem(cacheKey, JSON.stringify(ayahs)); }catch(e){}
-    quranPanelData[juzNum] = { ayahs };
-  }catch(e){
-    quranPanelData[juzNum] = { error: true };
-  }
-  return quranPanelData[juzNum];
-}
-
-function quranTextPanelHTML(){
-  const juzNums = (String(testForm.juz).match(/\d+/g) || []).map(Number);
-  if(!juzNums.length) return '';
-  if(!quranPanelActiveJuz || !juzNums.includes(quranPanelActiveJuz)) quranPanelActiveJuz = juzNums[0];
-  const entry = quranPanelData[quranPanelActiveJuz];
-
-  let body;
-  if(quranPanelLoading && !entry){
-    body = `<div style="text-align:center; padding:30px 0; color:var(--ink-soft); font-size:13px;">جاري تحميل نص الجزء...</div>`;
-  } else if(!entry){
-    body = `<div style="text-align:center; padding:30px 0; color:var(--ink-soft); font-size:13px;">دوس "تحميل" حتى يظهر نص الجزء.</div>`;
-  } else if(entry.error){
-    body = `<div style="text-align:center; padding:20px 0; color:var(--red); font-size:12.5px;">تعذّر تحميل النص — تأكد من الاتصال بالإنترنت أول مرة (بعدها بيضل محفوظ ويشتغل بدون نت).</div>`;
-  } else {
-    let lastSurah = null;
-    body = entry.ayahs.map(a=>{
-      const surahName = a.surah && a.surah.name;
-      const header = surahName && surahName !== lastSurah
-        ? (()=>{ lastSurah = surahName; return `<div style="text-align:center; font-family:'Amiri',serif; font-weight:700; font-size:17px; color:var(--gold); margin:14px 0 8px; padding-bottom:6px; border-bottom:1px solid var(--line);">${escapeHtml(surahName)}</div>`; })()
-        : '';
-      return header + `<span style="font-family:'Amiri',serif; font-size:19px; line-height:2.1; color:var(--ink);">${escapeHtml(a.text)} <span style="font-size:13px; color:var(--gold); font-weight:700;">﴿${a.numberInSurah}﴾</span></span> `;
-    }).join('');
-  }
-
-  return `
-  <div class="settings-block" style="margin-top:4px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
-      <h3 style="margin:0;">📖 نص الجزء</h3>
-      ${juzNums.length > 1 ? `
-      <select id="quran-panel-juz-select" style="font-size:12px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink); font-family:'Tajawal';">
-        ${juzNums.map(n=>`<option value="${n}" ${n===quranPanelActiveJuz?'selected':''}>الجزء ${juzOrdinal(n)}</option>`).join('')}
-      </select>` : ''}
-      ${!entry || entry.error ? `<button class="ghost" id="btn-load-quran-text" style="font-size:12px; padding:5px 10px;">تحميل</button>` : ''}
-    </div>
-    <div id="quran-panel-body" style="max-height:340px; overflow-y:auto; text-align:justify; padding:4px 2px; direction:rtl;">${body}</div>
-  </div>
-  `;
-}
-
 function testScoringView(){
   const score = currentScore();
   return `
@@ -2048,11 +1974,6 @@ function testScoringView(){
     <div class="scoring-meta">المحفّظ: <b>${escapeHtml(testForm.teacherName)}</b> · ${escapeHtml(formatJuzRange(testForm.juz))}</div>
     <div class="scoring-meta">⏱ مدة الاختبار: <b id="exam-timer">${formatDuration(elapsedExamSeconds())}</b></div>
   </div>
-
-  <button type="button" id="btn-toggle-quran-panel" class="btn btn-ghost" style="width:100%; margin-bottom:10px;">
-    ${quranPanelOpen ? 'إخفاء نص الجزء 📖' : 'عرض نص الجزء (بدل المصحف) 📖'}
-  </button>
-  ${quranPanelOpen ? quranTextPanelHTML() : ''}
 
   <div class="score-panel">
     <div class="score-num">${score}</div>
@@ -2181,38 +2102,6 @@ function attachTestScoringHandlers(){
 
   const notesEl = document.getElementById('f-scoring-notes');
   if(notesEl) notesEl.oninput = ()=>{ testForm.notes = notesEl.value; saveDraft(); };
-
-  const toggleQuranBtn = document.getElementById('btn-toggle-quran-panel');
-  if(toggleQuranBtn) toggleQuranBtn.onclick = ()=>{
-    quranPanelOpen = !quranPanelOpen;
-    if(quranPanelOpen && !quranPanelActiveJuz){
-      const juzNums = (String(testForm.juz).match(/\d+/g) || []).map(Number);
-      quranPanelActiveJuz = juzNums[0] || null;
-    }
-    if(quranPanelOpen && quranPanelActiveJuz && !quranPanelData[quranPanelActiveJuz]){
-      quranPanelLoading = true;
-      loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
-    }
-    rerenderTestOnly();
-  };
-
-  const quranJuzSelect = document.getElementById('quran-panel-juz-select');
-  if(quranJuzSelect) quranJuzSelect.onchange = ()=>{
-    quranPanelActiveJuz = Number(quranJuzSelect.value);
-    if(!quranPanelData[quranPanelActiveJuz]){
-      quranPanelLoading = true;
-      loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
-    }
-    rerenderTestOnly();
-  };
-
-  const loadQuranBtn = document.getElementById('btn-load-quran-text');
-  if(loadQuranBtn) loadQuranBtn.onclick = ()=>{
-    delete quranPanelData[quranPanelActiveJuz];
-    quranPanelLoading = true;
-    rerenderTestOnly();
-    loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
-  };
 
   document.querySelectorAll('.deduct-btn').forEach(b=>{
     b.onclick = ()=>{
@@ -2489,7 +2378,7 @@ function attachHistoryHandlers(){
   refreshHistoryList();
 
   const reportBtn = document.getElementById('btn-monthly-report');
-  if(reportBtn) reportBtn.onclick = ()=> openMonthlyReportPicker(reportBtn);
+  if(reportBtn) reportBtn.onclick = ()=> generateMonthlyReport(reportBtn);
 
   const dailyPngBtn = document.getElementById('btn-daily-png');
   if(dailyPngBtn) dailyPngBtn.onclick = ()=> exportDailyResults(dailyPngBtn);
@@ -3336,52 +3225,37 @@ function drawScoreChart(canvas, examsAsc){
 }
 
 /* ---------------- PERIOD REPORT (شهري / سنوي) ---------------- */
-async function drawMonthlyReport(period, selectedYearMonth){
+async function drawMonthlyReport(period, monthStr){
   period = period || 'month';
   await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
   await loadLogoImage();
   const now = new Date();
-
-  // إذا اختار المستخدم شهرًا معينًا، نستخدمه بدل الشهر الحالي.
-  let reportYear = now.getFullYear();
-  let reportMonth = now.getMonth();
-
-  if(period === 'month' && selectedYearMonth){
-    const parts = String(selectedYearMonth).split('-').map(Number);
-    if(parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])){
-      reportYear = parts[0];
-      reportMonth = parts[1] - 1;
-    }
+  // For a monthly report, monthStr (format 'YYYY-MM') lets the caller pick
+  // any month, not just the current one. Falls back to the current month
+  // when not given.
+  let targetYear = now.getFullYear(), targetMonth = now.getMonth();
+  if(period==='month' && monthStr && /^\d{4}-\d{1,2}$/.test(monthStr)){
+    const [y,m] = monthStr.split('-').map(Number);
+    targetYear = y; targetMonth = m - 1;
   }
-
-  const reportDate = new Date(reportYear, reportMonth, 1);
   const periodLabel = period==='year'
-    ? String(reportYear)
-    : reportDate.toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
-
-  // التقرير يعتمد على الاختبارات الناجحة فقط (80 فأعلى).
-  // محاولات الرسوب لا تسحب متوسط الطالب إلى أسفل، لأن الطالب يعيد الاختبار.
+    ? now.toLocaleDateString('ar-EG', {year:'numeric'})
+    : new Date(targetYear, targetMonth, 1).toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
   const periodExams = visibleExams().filter(e=>{
     const d = new Date(e.date);
-    if(period==='year') return d.getFullYear()===reportYear;
-    return d.getFullYear()===reportYear && d.getMonth()===reportMonth;
+    if(period==='year') return d.getFullYear()===now.getFullYear();
+    return d.getFullYear()===targetYear && d.getMonth()===targetMonth;
   });
-  const successfulExams = periodExams.filter(e=>Number(e.score) >= 80);
 
   const byStudent = {};
-  successfulExams.forEach(e=>{
-    const key = (e.studentName || '').trim();
-    if(!key) return;
-    if(!byStudent[key]) byStudent[key] = { count:0, total:0, date:e.date, teacherName:e.teacherName || '' };
-    byStudent[key].count += 1;
-    byStudent[key].total += Number(e.score) || 0;
-    // آخر محاولة ناجحة للعرض.
-    if(new Date(e.date) > new Date(byStudent[key].date)){
-      byStudent[key].date = e.date;
-      byStudent[key].teacherName = e.teacherName || byStudent[key].teacherName;
+  periodExams.forEach(e=>{
+    const key = e.studentName.trim();
+    if(!byStudent[key] || new Date(e.date) > new Date(byStudent[key].date)){
+      byStudent[key] = { ...byStudent[key], date: e.date, teacherName: e.teacherName };
     }
+    byStudent[key].count = (byStudent[key].count||0) + 1;
+    byStudent[key].total = (byStudent[key].total||0) + e.score;
   });
-
   const rows = Object.keys(byStudent)
     .map(name => ({
       name, count: byStudent[name].count,
@@ -3389,17 +3263,17 @@ async function drawMonthlyReport(period, selectedYearMonth){
       teacherName: byStudent[name].teacherName,
       date: byStudent[name].date,
     }))
-    .filter(row => row.avg >= 80)
-    .sort((a,b)=> b.avg - a.avg || b.count - a.count);
+    .sort((a,b)=> b.count - a.count);
 
-  // لا نختصر القائمة إلى 14 طالبًا؛ كل الطلاب المستحقين يظهرون في التقرير.
-  const shownRows = rows;
-  const avgAll = successfulExams.length ? Math.round(successfulExams.reduce((s,e)=>s+(Number(e.score)||0),0)/successfulExams.length) : 0;
+  const maxRows = 14;
+  const shownRows = rows.slice(0, maxRows);
+  const extra = rows.length - shownRows.length;
+  const avgAll = periodExams.length ? Math.round(periodExams.reduce((s,e)=>s+e.score,0)/periodExams.length) : 0;
 
   const W = 1500;
   const rowH = 58;
   const tableTop = 615;
-  const H = tableTop + 60 + shownRows.length*rowH + 190;
+  const H = tableTop + 60 + shownRows.length*rowH + (extra>0?36:0) + 190;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
@@ -3416,13 +3290,14 @@ async function drawMonthlyReport(period, selectedYearMonth){
 
   drawPillBadge(ctx, W/2, 385, periodLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
 
+  // Stat cards
   const cardW = 380, cardH = 108, gap = 30, cardY = 435;
   const totalW = cardW*3 + gap*2;
   const startX = (W-totalW)/2;
   const cardsData = [
-    { val: avgAll, lbl: 'متوسط الدرجات الناجحة', icon:'star' },
+    { val: avgAll, lbl: 'متوسط الدرجات', icon:'star' },
     { val: rows.length, lbl: 'عدد الطلاب', icon:'people' },
-    { val: successfulExams.length, lbl: 'إجمالي الاختبارات الناجحة', icon:'clip' },
+    { val: periodExams.length, lbl: 'إجمالي الاختبارات', icon:'clip' },
   ];
   cardsData.forEach((c,i)=>{
     const x = startX + i*(cardW+gap);
@@ -3435,6 +3310,7 @@ async function drawMonthlyReport(period, selectedYearMonth){
     ctx.closePath();
     ctx.fillStyle = '#fff'; ctx.fill();
     ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
+
     drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
     ctx.textAlign = 'center';
     ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
@@ -3443,15 +3319,17 @@ async function drawMonthlyReport(period, selectedYearMonth){
     ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
   });
 
+  // Table
   const tX = startX, tW = totalW;
   const colWidths = { name:0.27, teacher:0.24, date:0.19, count:0.15, avg:0.15 };
   const cols = [
     { key:'name', label:'اسم الطالب', w: tW*colWidths.name },
     { key:'teacher', label:'المحفّظ', w: tW*colWidths.teacher },
-    { key:'date', label:'آخر اختبار ناجح', w: tW*colWidths.date },
-    { key:'count', label:'عدد الاختبارات الناجحة', w: tW*colWidths.count },
-    { key:'avg', label:'متوسط النجاح', w: tW*colWidths.avg },
+    { key:'date', label:'آخر اختبار', w: tW*colWidths.date },
+    { key:'count', label:'عدد الاختبارات', w: tW*colWidths.count },
+    { key:'avg', label:'متوسط الدرجة', w: tW*colWidths.avg },
   ];
+  // header row (rightmost column = اسم الطالب, matching RTL reading order)
   let cx = tX + tW;
   ctx.font = "700 19px 'Tajawal'";
   cols.forEach(col=>{
@@ -3460,7 +3338,8 @@ async function drawMonthlyReport(period, selectedYearMonth){
     ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(x0, tableTop, col.w, 54);
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
     ctx.fillText(col.label, x0+col.w/2, tableTop+34);
-    col._x0 = x0; cx = x0;
+    col._x0 = x0;
+    cx = x0;
   });
 
   ctx.font = "500 18px 'Tajawal'";
@@ -3472,189 +3351,378 @@ async function drawMonthlyReport(period, selectedYearMonth){
     const dateStr = d.toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
     const values = { name:row.name, teacher:row.teacherName, date:dateStr, count:String(row.count), avg:String(row.avg) };
     ctx.fillStyle = PAL.ink;
-    cols.forEach(col=>{ ctx.textAlign = 'center'; ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6); });
+    cols.forEach(col=>{
+      ctx.textAlign = 'center';
+      ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6);
+    });
   });
   ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
   ctx.strokeRect(tX, tableTop, tW, 54 + shownRows.length*rowH);
 
-  const afterTableY = tableTop + 54 + shownRows.length*rowH + 30;
+  let afterTableY = tableTop + 54 + shownRows.length*rowH + 30;
+  if(extra>0){
+    ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
+    ctx.fillText(`و ${extra} طالب/ـة آخرين...`, W/2, afterTableY);
+    afterTableY += 34;
+  }
+
+  // Dua plaque
   const plaqueW = 620, plaqueH = 110, plaqueX = W/2-plaqueW/2, plaqueY = afterTableY+10;
   ctx.beginPath();
-  ctx.moveTo(plaqueX+30, plaqueY); ctx.lineTo(plaqueX+plaqueW-30, plaqueY);
+  ctx.moveTo(plaqueX+30, plaqueY);
+  ctx.lineTo(plaqueX+plaqueW-30, plaqueY);
   ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY, plaqueX+plaqueW, plaqueY+plaqueH/2);
   ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY+plaqueH, plaqueX+plaqueW-30, plaqueY+plaqueH);
   ctx.lineTo(plaqueX+30, plaqueY+plaqueH);
   ctx.quadraticCurveTo(plaqueX, plaqueY+plaqueH, plaqueX, plaqueY+plaqueH/2);
   ctx.quadraticCurveTo(plaqueX, plaqueY, plaqueX+30, plaqueY);
   ctx.closePath();
-  ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = PAL.gold; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.strokeStyle = PAL.gold; ctx.lineWidth = 2; ctx.stroke();
   ctx.fillStyle = PAL.green; ctx.font = "600 21px 'Tajawal'"; ctx.textAlign = 'center';
   ctx.fillText('نسأل الله أن يتقبل من الجميع', W/2, plaqueY+45);
   ctx.fillText('وأن يجعل القرآن نوراً لهم في الدنيا والآخرة', W/2, plaqueY+78);
 
-  return { canvas, monthExams: successfulExams };
+  return { canvas, monthExams: periodExams };
 }
 
-async function generateMonthlyReport(btnEl, period, selectedYearMonth){
+async function generateMonthlyReport(btnEl, period, monthStr){
   period = period || 'month';
   if(btnEl) btnEl.disabled = true;
   try{
-    const { canvas, monthExams } = await drawMonthlyReport(period, selectedYearMonth);
+    const { canvas, monthExams } = await drawMonthlyReport(period, monthStr);
     if(monthExams.length === 0){
-      showToast(period==='year'
-        ? 'لا توجد اختبارات مسجّلة في السنة المحددة'
-        : 'لا توجد اختبارات مسجّلة في الشهر المحدد');
+      showToast(period==='year' ? 'لا توجد اختبارات مسجّلة هالسنة بعد' : 'لا توجد اختبارات مسجّلة بهذا الشهر');
       return;
     }
-
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-
-    let reportDate = new Date();
-    if(period === 'month' && selectedYearMonth){
-      const parts = String(selectedYearMonth).split('-').map(Number);
-      if(parts.length === 2) reportDate = new Date(parts[0], parts[1]-1, 1);
-    }
-
+    const now = new Date();
+    const [fnYear, fnMonth] = (period==='month' && monthStr && /^\d{4}-\d{1,2}$/.test(monthStr))
+      ? monthStr.split('-').map(Number)
+      : [now.getFullYear(), now.getMonth()+1];
     const fileName = period==='year'
-      ? `تقرير-سنوي-${reportDate.getFullYear()}.png`
-      : `تقرير-شهري-${reportDate.getFullYear()}-${String(reportDate.getMonth()+1).padStart(2,'0')}.png`;
-
+      ? `تقرير-سنوي-${now.getFullYear()}.png`
+      : `تقرير-شهري-${fnYear}-${fnMonth}.png`;
     const file = new File([blob], fileName, { type:'image/png' });
     const title = period==='year' ? 'التقرير السنوي' : 'التقرير الشهري';
 
     if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({
-        files:[file],
-        title,
-        text: title + ' لـ' + getCenterSettings().name
-      });
+      await navigator.share({ files:[file], title, text: title + ' لـ' + getCenterSettings().name });
     } else {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
       showToast(period==='year' ? 'تم حفظ التقرير السنوي كصورة' : 'تم حفظ التقرير الشهري كصورة');
     }
   }catch(e){
     if(e && e.name !== 'AbortError'){
       console.error(e);
-      showToast('تعذّر إصدار التقرير');
+      showToast('تعذّر إصدار التقرير، حاول مرة ثانية');
     }
   }finally{
     if(btnEl) btnEl.disabled = false;
   }
 }
 
-function openMonthlyReportPicker(btnEl){
-  const old = document.getElementById('monthly-report-picker');
-  if(old) old.remove();
+/* Today's exam results, as a single shareable image (PNG) — one row
+   per exam taken today, colored red when the result is a fail/retake,
+   so an examiner can send the day's results in one message right after
+   finishing testing, without opening Excel. */
+async function drawDailyResultsImage(){
+  await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
+  await loadLogoImage();
+  const today = todayStamp();
+  const todayExams = visibleExams()
+    .filter(e => e.date.slice(0,10) === today)
+    .sort((a,b)=> new Date(a.date) - new Date(b.date));
 
-  const now = new Date();
-  const defaultValue = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  const dateLabel = new Date().toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
+  const passCount = todayExams.filter(e => !e.stoppedEarly && e.score>=80).length;
+  const failCount = todayExams.length - passCount;
+  const avgAll = todayExams.length ? Math.round(todayExams.reduce((s,e)=>s+e.score,0)/todayExams.length) : 0;
 
-  const panel = document.createElement('div');
-  panel.id = 'monthly-report-picker';
-  panel.style.cssText = `
-    margin:12px 0;
-    padding:14px;
-    border:1px solid #e3d9c4;
-    border-radius:14px;
-    background:#fff;
-    box-shadow:0 6px 18px rgba(0,0,0,.06);
-  `;
+  const W = 1500;
+  const rowH = 58;
+  const tableTop = 615;
+  const maxRows = 20;
+  const shownRows = todayExams.slice(0, maxRows);
+  const extra = todayExams.length - shownRows.length;
+  const H = tableTop + 60 + Math.max(shownRows.length,1)*rowH + (extra>0?36:0) + 170;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
 
-  panel.innerHTML = `
-    <div style="font-weight:800;color:#1f5a42;margin-bottom:10px;">
-      تحديد الشهر والسنة للتقرير
-    </div>
-    <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
-      <div style="flex:1;min-width:180px;">
-        <label style="display:block;font-size:12px;font-weight:700;margin-bottom:5px;">الشهر والسنة</label>
-        <input id="monthly-report-period" type="month" value="${defaultValue}"
-          style="width:100%;box-sizing:border-box;">
-      </div>
-      <button class="btn-report" id="monthly-report-generate" type="button">إصدار التقرير</button>
-      <button class="btn-report" id="monthly-report-cancel" type="button">إلغاء</button>
-    </div>
-  `;
+  ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
+  drawHeader(ctx, W, H, 225);
 
-  const parent = btnEl && btnEl.parentElement ? btnEl.parentElement : document.body;
-  parent.insertAdjacentElement('afterend', panel);
+  ctx.direction = 'rtl'; ctx.textAlign = 'center';
+  ctx.fillStyle = PAL.green;
+  ctx.font = "700 46px 'Amiri', serif";
+  ctx.fillText('نتائج اختبارات اليوم', W/2, 335);
+  drawFlourish(ctx, W/2-220, 325, 14, PAL.gold);
+  drawFlourish(ctx, W/2+220, 325, 14, PAL.gold);
 
-  panel.querySelector('#monthly-report-cancel').onclick = () => panel.remove();
+  drawPillBadge(ctx, W/2, 385, dateLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
 
-  panel.querySelector('#monthly-report-generate').onclick = async () => {
-    const selected = panel.querySelector('#monthly-report-period').value;
-    if(!selected){
-      showToast('حدد الشهر والسنة أولاً');
-      return;
-    }
-    panel.remove();
-    await generateMonthlyReport(btnEl, 'month', selected);
-  };
+  const cardW = 380, cardH = 108, gap = 30, cardY = 435;
+  const totalW = cardW*3 + gap*2;
+  const startX = (W-totalW)/2;
+  const cardsData = [
+    { val: todayExams.length, lbl: 'إجمالي الاختبارات', icon:'clip' },
+    { val: passCount, lbl: 'ناجح', icon:'star' },
+    { val: failCount, lbl: 'إعادة', icon:'people' },
+  ];
+  cardsData.forEach((c,i)=>{
+    const x = startX + i*(cardW+gap);
+    ctx.beginPath();
+    ctx.moveTo(x+14,cardY); ctx.lineTo(x+cardW-14,cardY);
+    ctx.arcTo(x+cardW,cardY,x+cardW,cardY+14,14);
+    ctx.lineTo(x+cardW,cardY+cardH-14); ctx.arcTo(x+cardW,cardY+cardH,x+cardW-14,cardY+cardH,14);
+    ctx.lineTo(x+14,cardY+cardH); ctx.arcTo(x,cardY+cardH,x,cardY+cardH-14,14);
+    ctx.lineTo(x,cardY+14); ctx.arcTo(x,cardY,x+14,cardY,14);
+    ctx.closePath();
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
+    ctx.fillText(String(c.val), x+cardW/2-25, cardY+cardH/2+2);
+    ctx.fillStyle = PAL.inkSoft; ctx.font = "600 16px 'Tajawal'";
+    ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
+  });
+
+  const tX = startX, tW = totalW;
+  const colWidths = { name:0.30, teacher:0.26, juz:0.24, score:0.20 };
+  const cols = [
+    { key:'name', label:'اسم الطالب', w: tW*colWidths.name },
+    { key:'teacher', label:'المحفّظ', w: tW*colWidths.teacher },
+    { key:'juz', label:'الجزء', w: tW*colWidths.juz },
+    { key:'score', label:'العلامة', w: tW*colWidths.score },
+  ];
+  let cx = tX + tW;
+  ctx.font = "700 19px 'Tajawal'";
+  cols.forEach(col=>{
+    const x0 = cx - col.w;
+    ctx.fillStyle = PAL.green; ctx.fillRect(x0, tableTop, col.w, 54);
+    ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(x0, tableTop, col.w, 54);
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.fillText(col.label, x0+col.w/2, tableTop+34);
+    col._x0 = x0;
+    cx = x0;
+  });
+
+  ctx.font = "500 18px 'Tajawal'";
+  if(shownRows.length===0){
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(tX, tableTop+54, tW, rowH);
+    ctx.fillStyle = PAL.inkSoft; ctx.textAlign = 'center';
+    ctx.fillText('ما في اختبارات مسجّلة اليوم', tX+tW/2, tableTop+54+rowH/2+6);
+  }
+  shownRows.forEach((e,i)=>{
+    const y = tableTop + 54 + i*rowH;
+    const isFail = e.stoppedEarly || e.score < 80;
+    ctx.fillStyle = isFail ? '#FBE7E5' : (i%2===0 ? '#FFFFFF' : '#FAF4E4');
+    ctx.fillRect(tX, y, tW, rowH);
+    const scoreText = e.stoppedEarly ? 'إعادة' : String(e.score);
+    const values = { name:e.studentName, teacher:e.teacherName, juz:formatJuzRange(e.juz), score:scoreText };
+    ctx.fillStyle = isFail ? PAL.red : PAL.ink;
+    cols.forEach(col=>{
+      ctx.textAlign = 'center';
+      ctx.font = col.key==='score' ? "700 19px 'Tajawal'" : "500 18px 'Tajawal'";
+      ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6);
+    });
+  });
+  ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(tX, tableTop, tW, 54 + Math.max(shownRows.length,1)*rowH);
+
+  let afterTableY = tableTop + 54 + Math.max(shownRows.length,1)*rowH + 34;
+  if(extra>0){
+    ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
+    ctx.fillText(`و ${extra} اختبار آخر...`, W/2, afterTableY);
+    afterTableY += 34;
+  }
+  ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
+  ctx.fillText(`متوسط علامات اليوم: ${avgAll}`, W/2, afterTableY + 14);
+
+  return { canvas, todayExams };
 }
 
-function openMonthlyReportPicker(btnEl){
-  const old = document.getElementById('monthly-report-picker');
-  if(old) old.remove();
-
-  const now = new Date();
-  const defaultValue = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
-
-  const panel = document.createElement('div');
-  panel.id = 'monthly-report-picker';
-  panel.style.cssText = `
-    margin:12px 0;
-    padding:14px;
-    border:1px solid var(--line);
-    border-radius:14px;
-    background:var(--card);
-    box-shadow:0 6px 18px rgba(0,0,0,.06);
-  `;
-
-  panel.innerHTML = `
-    <div style="font-weight:800;color:var(--green);margin-bottom:10px;">
-      تحديد الشهر والسنة للتقرير
-    </div>
-    <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
-      <div style="flex:1;min-width:180px;">
-        <label style="display:block;font-size:12px;font-weight:700;margin-bottom:5px;">الشهر والسنة</label>
-        <input id="monthly-report-period" type="month" value="${defaultValue}"
-          style="width:100%;box-sizing:border-box;">
-      </div>
-      <button class="btn-report" id="monthly-report-generate">
-        إصدار التقرير
-      </button>
-      <button class="btn-report" id="monthly-report-cancel" type="button">
-        إلغاء
-      </button>
-    </div>
-  `;
-
-  const parent = btnEl && btnEl.parentElement ? btnEl.parentElement : document.body;
-  parent.insertAdjacentElement('afterend', panel);
-
-  const generateBtn = panel.querySelector('#monthly-report-generate');
-  const cancelBtn = panel.querySelector('#monthly-report-cancel');
-  const periodInput = panel.querySelector('#monthly-report-period');
-
-  cancelBtn.onclick = () => panel.remove();
-
-  generateBtn.onclick = async () => {
-    const selected = periodInput.value;
-    if(!selected){
-      showToast('حدد الشهر والسنة أولاً');
+async function exportDailyResults(btnEl){
+  if(btnEl) btnEl.disabled = true;
+  try{
+    const { canvas, todayExams } = await drawDailyResultsImage();
+    if(todayExams.length === 0){
+      showToast('لا توجد اختبارات مسجّلة اليوم بعد');
       return;
     }
-    panel.remove();
-    await generateMonthlyReport(btnEl, 'month', selected);
-  };
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    const today = todayStamp();
+    const fileName = `نتائج-اليوم-${today}.png`;
+    const file = new File([blob], fileName, { type:'image/png' });
+    const title = 'نتائج اختبارات اليوم';
+
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast('تم حفظ نتائج اليوم كصورة');
+    }
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      console.error(e);
+      showToast('تعذّر إصدار النتائج، حاول مرة ثانية');
+    }
+  }finally{
+    if(btnEl) btnEl.disabled = false;
+  }
 }
 
+/* Same daily results report, exported as a one-page PDF instead of a
+   PNG — some people prefer sending/printing a PDF. Reuses the exact
+   same canvas drawing; only the export format differs. */
+/* Batch certificate generation — one combined PDF with one page per
+   eligible exam (passed, not a retry) within the chosen month. Reuses
+   the exact same drawCertificate() used for individual shares, so the
+   design always stays in sync automatically. */
+async function generateBatchCertificatesPDF(monthStr, btnEl){
+  if(btnEl) btnEl.disabled = true;
+  const errEl = document.getElementById('batch-cert-error');
+  if(errEl) errEl.textContent = '';
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
+      return;
+    }
+    if(!monthStr){ if(errEl) errEl.textContent = 'اختر الشهر أولاً'; return; }
+    const eligible = visibleExams()
+      .filter(e => !e.stoppedEarly && e.score >= 80 && e.date.slice(0,7) === monthStr)
+      .sort((a,b)=> a.studentName.localeCompare(b.studentName, 'ar'));
+    if(eligible.length === 0){
+      showToast('ما في شهادات مستحقة خلال هذا الشهر');
+      return;
+    }
+    showToast(`جاري توليد ${eligible.length} شهادة...`);
+    const { jsPDF } = window.jspdf;
+    let pdf = null;
+    let failedCount = 0;
+    const startedAt = Date.now();
+    for(let i=0; i<eligible.length; i++){
+      showToast(`جاري توليد الشهادة ${i+1} من ${eligible.length}...`);
+      // Yield to the browser between certificates so it actually gets a
+      // chance to paint that progress toast and stay responsive, instead
+      // of running all the canvas work back-to-back on one long block
+      // that can look like a frozen/blank screen on a slower phone.
+      await new Promise(r => setTimeout(r, 0));
+      let canvas;
+      try{
+        // A stuck font load or image decode should not freeze the whole
+        // batch forever — skip that one certificate and keep going
+        // rather than leaving the person staring at "جاري توليد" with
+        // no feedback and no result.
+        canvas = await withTimeout(drawCertificate(eligible[i]), 15000);
+      }catch(e){
+        console.warn('تعذّر توليد شهادة الطالب', eligible[i].studentName, e);
+        failedCount++;
+        continue;
+      }
+      // JPEG instead of PNG: certificates have no transparency to lose,
+      // and this cuts file size drastically (often 5-10x smaller) —
+      // important for a multi-page batch PDF on a mobile connection,
+      // where a huge PNG-based file is the most likely reason nothing
+      // seems to happen after "جاري توليد".
+      const imgData = canvas.toDataURL('image/jpeg', 0.85);
+      if(!pdf){
+        pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height], compress: true });
+      } else {
+        pdf.addPage([canvas.width, canvas.height], 'l');
+      }
+      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
+    }
+    if(!pdf){
+      showToast('تعذّر توليد أي شهادة — جرّب مرة ثانية أو تحقّق من الاتصال');
+      return;
+    }
+    const successCount = eligible.length - failedCount;
+    const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+    showToast(`جاري تجهيز الملف (${elapsedSec} ثانية)...`);
+    const [year, month] = monthStr.split('-');
+    const fileName = `شهادات-${year}-${month}.pdf`;
+    const blob = pdf.output('blob');
+
+    // Batch PDFs can get large (many pages) — handing a large file to
+    // the OS share sheet is the more failure-prone path on mobile
+    // (can silently do nothing on some devices/browsers), so batches
+    // always go straight to a direct download instead of navigator.share.
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 30000);
+    showToast(failedCount>0
+      ? `تم توليد ${successCount} من ${eligible.length} شهادة (تعذّر توليد ${failedCount}) — تحقّق من مجلد التنزيلات`
+      : `تم توليد ${successCount} شهادة بملف واحد — تحقّق من مجلد التنزيلات`);
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      console.error(e);
+      showToast('تعذّر توليد الشهادات، حاول مرة ثانية');
+    }
+  }finally{
+    if(btnEl) btnEl.disabled = false;
+  }
+}
+
+async function exportDailyResultsPDF(btnEl){
+  if(btnEl) btnEl.disabled = true;
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
+      return;
+    }
+    const { canvas, todayExams } = await drawDailyResultsImage();
+    if(todayExams.length === 0){
+      showToast('لا توجد اختبارات مسجّلة اليوم بعد');
+      return;
+    }
+    const imgData = canvas.toDataURL('image/png');
+    const { jsPDF } = window.jspdf;
+    const orientation = canvas.width >= canvas.height ? 'l' : 'p';
+    const pdf = new jsPDF({ orientation, unit:'pt', format:[canvas.width, canvas.height] });
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    const today = todayStamp();
+    const fileName = `نتائج-اليوم-${today}.pdf`;
+    const blob = pdf.output('blob');
+    const file = new File([blob], fileName, { type:'application/pdf' });
+    const title = 'نتائج اختبارات اليوم';
+
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast('تم حفظ نتائج اليوم كملف PDF');
+    }
+  }catch(e){
+    if(e && e.name !== 'AbortError'){
+      console.error(e);
+      showToast('تعذّر إصدار ملف PDF، حاول مرة ثانية');
+    }
+  }finally{
+    if(btnEl) btnEl.disabled = false;
+  }
+}
+
+
+/* ---------------- STATS VIEW ---------------- */
+/* ---------------- DASHBOARD (نظرة عامة) — admin/examiner landing page ---------------- */
 function dashboardView(){
   const todayStr = todayStamp();
   const todayExamsCount = visibleExams().filter(e => e.date.slice(0,10) === todayStr).length;
@@ -3740,9 +3808,30 @@ function statsView(){
   const uniqueStudents = Object.keys(studentCounts).length;
   const topStudent = Object.entries(studentCounts).sort((a,b)=>b[1]-a[1])[0];
   const topTeacher = Object.entries(teacherCounts).sort((a,b)=>b[1]-a[1])[0];
-  const bestStudent = Object.entries(studentScores)
-    .map(([name,d])=>({ name, avg: Math.round(d.total/d.count) }))
-    .sort((a,b)=> b.avg-a.avg)[0];
+
+  // "أفضل طالب" ranking: a raw average lets a student with a single
+  // lucky 90+ exam outrank a student who has taken many exams and
+  // consistently scored 92-99. To fix that we pull every student's
+  // average toward the overall average by a fixed number of "virtual"
+  // exams (Bayesian/Laplace smoothing) — so a student with very few
+  // exams needs a very high score to compete, while a student with
+  // lots of exams is barely affected (their real average speaks for
+  // itself). The displayed average is still each student's true,
+  // unsmoothed average — only the ranking uses the smoothed score.
+  const allScoresCount = state.exams.length;
+  const overallAvg = allScoresCount ? state.exams.reduce((s,e)=>s+e.score,0)/allScoresCount : 0;
+  const MIN_EXAMS_FOR_BEST = 3; // below this, treat the student as "not enough data yet"
+  const SMOOTHING_WEIGHT = 4;  // acts like 4 extra exams at the overall average
+  const bestStudentCandidates = Object.entries(studentScores)
+    .map(([name,d])=>({
+      name,
+      avg: Math.round(d.total/d.count),
+      count: d.count,
+      ranked: (d.total + SMOOTHING_WEIGHT*overallAvg) / (d.count + SMOOTHING_WEIGHT),
+    }));
+  const bestStudentPool = bestStudentCandidates.filter(c=>c.count >= MIN_EXAMS_FOR_BEST);
+  const bestStudent = (bestStudentPool.length ? bestStudentPool : bestStudentCandidates)
+    .sort((a,b)=> b.ranked - a.ranked)[0];
 
   return `
   <div class="section-title">الإحصاءات</div>
@@ -3779,7 +3868,7 @@ function statsView(){
     <div class="hc-body">
       <div class="hc-lbl">أفضل طالب بالاختبارات</div>
       <div class="hc-val">${bestStudent ? escapeHtml(bestStudent.name) : '—'}</div>
-      <div class="hc-sub">${bestStudent ? 'بمتوسط ' + bestStudent.avg : ''}</div>
+      <div class="hc-sub">${bestStudent ? 'بمتوسط ' + bestStudent.avg + ' · ' + bestStudent.count + ' اختبار' : ''}</div>
     </div>
   </div>
 
@@ -3804,16 +3893,21 @@ function statsView(){
   })()}
 
   <div class="section-title" style="margin-top:22px;">التقارير</div>
-  <div class="history-toolbar">
-    <button class="btn-report" id="btn-monthly-report-stats">${iconReport()} تقرير شهري</button>
-    <button class="btn-report" id="btn-yearly-report-stats">${iconReport()} تقرير سنوي</button>
+  <div class="settings-block">
+    <label style="font-size:12.5px; color:var(--ink-soft); display:block; margin-bottom:6px;">اختر الشهر</label>
+    <input type="month" id="stats-report-month" value="${currentYearMonth()}" style="width:100%; margin-bottom:10px;">
+    <div class="history-toolbar">
+      <button class="btn-report" id="btn-monthly-report-stats">${iconReport()} تقرير الشهر المحدد</button>
+      <button class="btn-report" id="btn-yearly-report-stats">${iconReport()} تقرير سنوي (السنة الحالية)</button>
+    </div>
   </div>
   `;
 }
 
 function attachStatsHandlers(){
+  const monthInput = document.getElementById('stats-report-month');
   const btn = document.getElementById('btn-monthly-report-stats');
-  if(btn) btn.onclick = ()=> openMonthlyReportPicker(btn);
+  if(btn) btn.onclick = ()=> generateMonthlyReport(btn, 'month', monthInput ? monthInput.value : currentYearMonth());
   const ybtn = document.getElementById('btn-yearly-report-stats');
   if(ybtn) ybtn.onclick = ()=> generateMonthlyReport(ybtn, 'year');
 }
