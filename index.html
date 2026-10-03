@@ -3341,16 +3341,30 @@ async function drawMonthlyReport(period, selectedYearMonth){
   await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
   await loadLogoImage();
   const now = new Date();
+
+  // إذا اختار المستخدم شهرًا معينًا، نستخدمه بدل الشهر الحالي.
+  let reportYear = now.getFullYear();
+  let reportMonth = now.getMonth();
+
+  if(period === 'month' && selectedYearMonth){
+    const parts = String(selectedYearMonth).split('-').map(Number);
+    if(parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])){
+      reportYear = parts[0];
+      reportMonth = parts[1] - 1;
+    }
+  }
+
+  const reportDate = new Date(reportYear, reportMonth, 1);
   const periodLabel = period==='year'
-    ? now.toLocaleDateString('ar-EG', {year:'numeric'})
-    : now.toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
+    ? String(reportYear)
+    : reportDate.toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
 
   // التقرير يعتمد على الاختبارات الناجحة فقط (80 فأعلى).
   // محاولات الرسوب لا تسحب متوسط الطالب إلى أسفل، لأن الطالب يعيد الاختبار.
   const periodExams = visibleExams().filter(e=>{
     const d = new Date(e.date);
-    if(period==='year') return d.getFullYear()===now.getFullYear();
-    return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
+    if(period==='year') return d.getFullYear()===reportYear;
+    return d.getFullYear()===reportYear && d.getMonth()===reportMonth;
   });
   const successfulExams = periodExams.filter(e=>Number(e.score) >= 80);
 
@@ -3494,9 +3508,12 @@ async function generateMonthlyReport(btnEl, period, selectedYearMonth){
     }
 
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-    const reportDate = selectedYearMonth
-      ? new Date(Number(selectedYearMonth.slice(0,4)), Number(selectedYearMonth.slice(5,7))-1, 1)
-      : new Date();
+
+    let reportDate = new Date();
+    if(period === 'month' && selectedYearMonth){
+      const parts = String(selectedYearMonth).split('-').map(Number);
+      if(parts.length === 2) reportDate = new Date(parts[0], parts[1]-1, 1);
+    }
 
     const fileName = period==='year'
       ? `تقرير-سنوي-${reportDate.getFullYear()}.png`
@@ -3532,7 +3549,55 @@ async function generateMonthlyReport(btnEl, period, selectedYearMonth){
   }
 }
 
-/* اختيار الشهر والسنة قبل إصدار التقرير */
+function openMonthlyReportPicker(btnEl){
+  const old = document.getElementById('monthly-report-picker');
+  if(old) old.remove();
+
+  const now = new Date();
+  const defaultValue = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+
+  const panel = document.createElement('div');
+  panel.id = 'monthly-report-picker';
+  panel.style.cssText = `
+    margin:12px 0;
+    padding:14px;
+    border:1px solid #e3d9c4;
+    border-radius:14px;
+    background:#fff;
+    box-shadow:0 6px 18px rgba(0,0,0,.06);
+  `;
+
+  panel.innerHTML = `
+    <div style="font-weight:800;color:#1f5a42;margin-bottom:10px;">
+      تحديد الشهر والسنة للتقرير
+    </div>
+    <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
+      <div style="flex:1;min-width:180px;">
+        <label style="display:block;font-size:12px;font-weight:700;margin-bottom:5px;">الشهر والسنة</label>
+        <input id="monthly-report-period" type="month" value="${defaultValue}"
+          style="width:100%;box-sizing:border-box;">
+      </div>
+      <button class="btn-report" id="monthly-report-generate" type="button">إصدار التقرير</button>
+      <button class="btn-report" id="monthly-report-cancel" type="button">إلغاء</button>
+    </div>
+  `;
+
+  const parent = btnEl && btnEl.parentElement ? btnEl.parentElement : document.body;
+  parent.insertAdjacentElement('afterend', panel);
+
+  panel.querySelector('#monthly-report-cancel').onclick = () => panel.remove();
+
+  panel.querySelector('#monthly-report-generate').onclick = async () => {
+    const selected = panel.querySelector('#monthly-report-period').value;
+    if(!selected){
+      showToast('حدد الشهر والسنة أولاً');
+      return;
+    }
+    panel.remove();
+    await generateMonthlyReport(btnEl, 'month', selected);
+  };
+}
+
 function openMonthlyReportPicker(btnEl){
   const old = document.getElementById('monthly-report-picker');
   if(old) old.remove();
