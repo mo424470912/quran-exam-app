@@ -3265,10 +3265,14 @@ async function drawMonthlyReport(period, monthStr){
       byStudent[key].passTotal = (byStudent[key].passTotal||0) + e.score;
     }
   });
+  // Students with no passing exam this period (every attempt was a
+  // retry or under 80) are left out of the report entirely — only
+  // students who actually passed at least once get listed.
   const rows = Object.keys(byStudent)
+    .filter(name => byStudent[name].passCount > 0)
     .map(name => ({
       name, count: byStudent[name].count,
-      avg: byStudent[name].passCount ? Math.round(byStudent[name].passTotal / byStudent[name].passCount) : null,
+      avg: Math.round(byStudent[name].passTotal / byStudent[name].passCount),
       teacherName: byStudent[name].teacherName,
       date: byStudent[name].date,
     }))
