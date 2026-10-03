@@ -2489,7 +2489,7 @@ function attachHistoryHandlers(){
   refreshHistoryList();
 
   const reportBtn = document.getElementById('btn-monthly-report');
-  if(reportBtn) reportBtn.onclick = ()=> generateMonthlyReport(reportBtn);
+  if(reportBtn) reportBtn.onclick = ()=> openMonthlyReportPicker(reportBtn);
 
   const dailyPngBtn = document.getElementById('btn-daily-png');
   if(dailyPngBtn) dailyPngBtn.onclick = ()=> exportDailyResults(dailyPngBtn);
@@ -3336,7 +3336,7 @@ function drawScoreChart(canvas, examsAsc){
 }
 
 /* ---------------- PERIOD REPORT (شهري / سنوي) ---------------- */
-async function drawMonthlyReport(period){
+async function drawMonthlyReport(period, selectedYearMonth){
   period = period || 'month';
   await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
   await loadLogoImage();
@@ -3481,340 +3481,115 @@ async function drawMonthlyReport(period){
   return { canvas, monthExams: successfulExams };
 }
 
-async function generateMonthlyReport(btnEl, period){
+async function generateMonthlyReport(btnEl, period, selectedYearMonth){
   period = period || 'month';
   if(btnEl) btnEl.disabled = true;
   try{
-    const { canvas, monthExams } = await drawMonthlyReport(period);
+    const { canvas, monthExams } = await drawMonthlyReport(period, selectedYearMonth);
     if(monthExams.length === 0){
-      showToast(period==='year' ? 'لا توجد اختبارات مسجّلة هالسنة بعد' : 'لا توجد اختبارات مسجّلة هذا الشهر بعد');
+      showToast(period==='year'
+        ? 'لا توجد اختبارات مسجّلة في السنة المحددة'
+        : 'لا توجد اختبارات مسجّلة في الشهر المحدد');
       return;
     }
+
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-    const now = new Date();
+    const reportDate = selectedYearMonth
+      ? new Date(Number(selectedYearMonth.slice(0,4)), Number(selectedYearMonth.slice(5,7))-1, 1)
+      : new Date();
+
     const fileName = period==='year'
-      ? `تقرير-سنوي-${now.getFullYear()}.png`
-      : `تقرير-شهري-${now.getFullYear()}-${now.getMonth()+1}.png`;
+      ? `تقرير-سنوي-${reportDate.getFullYear()}.png`
+      : `تقرير-شهري-${reportDate.getFullYear()}-${String(reportDate.getMonth()+1).padStart(2,'0')}.png`;
+
     const file = new File([blob], fileName, { type:'image/png' });
     const title = period==='year' ? 'التقرير السنوي' : 'التقرير الشهري';
 
     if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' لـ' + getCenterSettings().name });
+      await navigator.share({
+        files:[file],
+        title,
+        text: title + ' لـ' + getCenterSettings().name
+      });
     } else {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = fileName;
-      document.body.appendChild(a); a.click(); a.remove();
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       URL.revokeObjectURL(url);
       showToast(period==='year' ? 'تم حفظ التقرير السنوي كصورة' : 'تم حفظ التقرير الشهري كصورة');
     }
   }catch(e){
     if(e && e.name !== 'AbortError'){
       console.error(e);
-      showToast('تعذّر إصدار التقرير، حاول مرة ثانية');
+      showToast('تعذّر إصدار التقرير');
     }
   }finally{
     if(btnEl) btnEl.disabled = false;
   }
 }
 
-/* Today's exam results, as a single shareable image (PNG) — one row
-   per exam taken today, colored red when the result is a fail/retake,
-   so an examiner can send the day's results in one message right after
-   finishing testing, without opening Excel. */
-async function drawDailyResultsImage(){
-  await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
-  await loadLogoImage();
-  const today = todayStamp();
-  const todayExams = visibleExams()
-    .filter(e => e.date.slice(0,10) === today)
-    .sort((a,b)=> new Date(a.date) - new Date(b.date));
+/* اختيار الشهر والسنة قبل إصدار التقرير */
+function openMonthlyReportPicker(btnEl){
+  const old = document.getElementById('monthly-report-picker');
+  if(old) old.remove();
 
-  const dateLabel = new Date().toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
-  const passCount = todayExams.filter(e => !e.stoppedEarly && e.score>=80).length;
-  const failCount = todayExams.length - passCount;
-  const avgAll = todayExams.length ? Math.round(todayExams.reduce((s,e)=>s+e.score,0)/todayExams.length) : 0;
+  const now = new Date();
+  const defaultValue = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
 
-  const W = 1500;
-  const rowH = 58;
-  const tableTop = 615;
-  const maxRows = 20;
-  const shownRows = todayExams.slice(0, maxRows);
-  const extra = todayExams.length - shownRows.length;
-  const H = tableTop + 60 + Math.max(shownRows.length,1)*rowH + (extra>0?36:0) + 170;
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
+  const panel = document.createElement('div');
+  panel.id = 'monthly-report-picker';
+  panel.style.cssText = `
+    margin:12px 0;
+    padding:14px;
+    border:1px solid var(--line);
+    border-radius:14px;
+    background:var(--card);
+    box-shadow:0 6px 18px rgba(0,0,0,.06);
+  `;
 
-  ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
-  drawHeader(ctx, W, H, 225);
+  panel.innerHTML = `
+    <div style="font-weight:800;color:var(--green);margin-bottom:10px;">
+      تحديد الشهر والسنة للتقرير
+    </div>
+    <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;">
+      <div style="flex:1;min-width:180px;">
+        <label style="display:block;font-size:12px;font-weight:700;margin-bottom:5px;">الشهر والسنة</label>
+        <input id="monthly-report-period" type="month" value="${defaultValue}"
+          style="width:100%;box-sizing:border-box;">
+      </div>
+      <button class="btn-report" id="monthly-report-generate">
+        إصدار التقرير
+      </button>
+      <button class="btn-report" id="monthly-report-cancel" type="button">
+        إلغاء
+      </button>
+    </div>
+  `;
 
-  ctx.direction = 'rtl'; ctx.textAlign = 'center';
-  ctx.fillStyle = PAL.green;
-  ctx.font = "700 46px 'Amiri', serif";
-  ctx.fillText('نتائج اختبارات اليوم', W/2, 335);
-  drawFlourish(ctx, W/2-220, 325, 14, PAL.gold);
-  drawFlourish(ctx, W/2+220, 325, 14, PAL.gold);
+  const parent = btnEl && btnEl.parentElement ? btnEl.parentElement : document.body;
+  parent.insertAdjacentElement('afterend', panel);
 
-  drawPillBadge(ctx, W/2, 385, dateLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
+  const generateBtn = panel.querySelector('#monthly-report-generate');
+  const cancelBtn = panel.querySelector('#monthly-report-cancel');
+  const periodInput = panel.querySelector('#monthly-report-period');
 
-  const cardW = 380, cardH = 108, gap = 30, cardY = 435;
-  const totalW = cardW*3 + gap*2;
-  const startX = (W-totalW)/2;
-  const cardsData = [
-    { val: todayExams.length, lbl: 'إجمالي الاختبارات', icon:'clip' },
-    { val: passCount, lbl: 'ناجح', icon:'star' },
-    { val: failCount, lbl: 'إعادة', icon:'people' },
-  ];
-  cardsData.forEach((c,i)=>{
-    const x = startX + i*(cardW+gap);
-    ctx.beginPath();
-    ctx.moveTo(x+14,cardY); ctx.lineTo(x+cardW-14,cardY);
-    ctx.arcTo(x+cardW,cardY,x+cardW,cardY+14,14);
-    ctx.lineTo(x+cardW,cardY+cardH-14); ctx.arcTo(x+cardW,cardY+cardH,x+cardW-14,cardY+cardH,14);
-    ctx.lineTo(x+14,cardY+cardH); ctx.arcTo(x,cardY+cardH,x,cardY+cardH-14,14);
-    ctx.lineTo(x,cardY+14); ctx.arcTo(x,cardY,x+14,cardY,14);
-    ctx.closePath();
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
+  cancelBtn.onclick = () => panel.remove();
 
-    drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
-    ctx.fillText(String(c.val), x+cardW/2-25, cardY+cardH/2+2);
-    ctx.fillStyle = PAL.inkSoft; ctx.font = "600 16px 'Tajawal'";
-    ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
-  });
-
-  const tX = startX, tW = totalW;
-  const colWidths = { name:0.30, teacher:0.26, juz:0.24, score:0.20 };
-  const cols = [
-    { key:'name', label:'اسم الطالب', w: tW*colWidths.name },
-    { key:'teacher', label:'المحفّظ', w: tW*colWidths.teacher },
-    { key:'juz', label:'الجزء', w: tW*colWidths.juz },
-    { key:'score', label:'العلامة', w: tW*colWidths.score },
-  ];
-  let cx = tX + tW;
-  ctx.font = "700 19px 'Tajawal'";
-  cols.forEach(col=>{
-    const x0 = cx - col.w;
-    ctx.fillStyle = PAL.green; ctx.fillRect(x0, tableTop, col.w, 54);
-    ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(x0, tableTop, col.w, 54);
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-    ctx.fillText(col.label, x0+col.w/2, tableTop+34);
-    col._x0 = x0;
-    cx = x0;
-  });
-
-  ctx.font = "500 18px 'Tajawal'";
-  if(shownRows.length===0){
-    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(tX, tableTop+54, tW, rowH);
-    ctx.fillStyle = PAL.inkSoft; ctx.textAlign = 'center';
-    ctx.fillText('ما في اختبارات مسجّلة اليوم', tX+tW/2, tableTop+54+rowH/2+6);
-  }
-  shownRows.forEach((e,i)=>{
-    const y = tableTop + 54 + i*rowH;
-    const isFail = e.stoppedEarly || e.score < 80;
-    ctx.fillStyle = isFail ? '#FBE7E5' : (i%2===0 ? '#FFFFFF' : '#FAF4E4');
-    ctx.fillRect(tX, y, tW, rowH);
-    const scoreText = e.stoppedEarly ? 'إعادة' : String(e.score);
-    const values = { name:e.studentName, teacher:e.teacherName, juz:formatJuzRange(e.juz), score:scoreText };
-    ctx.fillStyle = isFail ? PAL.red : PAL.ink;
-    cols.forEach(col=>{
-      ctx.textAlign = 'center';
-      ctx.font = col.key==='score' ? "700 19px 'Tajawal'" : "500 18px 'Tajawal'";
-      ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6);
-    });
-  });
-  ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
-  ctx.strokeRect(tX, tableTop, tW, 54 + Math.max(shownRows.length,1)*rowH);
-
-  let afterTableY = tableTop + 54 + Math.max(shownRows.length,1)*rowH + 34;
-  if(extra>0){
-    ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
-    ctx.fillText(`و ${extra} اختبار آخر...`, W/2, afterTableY);
-    afterTableY += 34;
-  }
-  ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
-  ctx.fillText(`متوسط علامات اليوم: ${avgAll}`, W/2, afterTableY + 14);
-
-  return { canvas, todayExams };
+  generateBtn.onclick = async () => {
+    const selected = periodInput.value;
+    if(!selected){
+      showToast('حدد الشهر والسنة أولاً');
+      return;
+    }
+    panel.remove();
+    await generateMonthlyReport(btnEl, 'month', selected);
+  };
 }
 
-async function exportDailyResults(btnEl){
-  if(btnEl) btnEl.disabled = true;
-  try{
-    const { canvas, todayExams } = await drawDailyResultsImage();
-    if(todayExams.length === 0){
-      showToast('لا توجد اختبارات مسجّلة اليوم بعد');
-      return;
-    }
-    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-    const today = todayStamp();
-    const fileName = `نتائج-اليوم-${today}.png`;
-    const file = new File([blob], fileName, { type:'image/png' });
-    const title = 'نتائج اختبارات اليوم';
-
-    if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fileName;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      showToast('تم حفظ نتائج اليوم كصورة');
-    }
-  }catch(e){
-    if(e && e.name !== 'AbortError'){
-      console.error(e);
-      showToast('تعذّر إصدار النتائج، حاول مرة ثانية');
-    }
-  }finally{
-    if(btnEl) btnEl.disabled = false;
-  }
-}
-
-/* Same daily results report, exported as a one-page PDF instead of a
-   PNG — some people prefer sending/printing a PDF. Reuses the exact
-   same canvas drawing; only the export format differs. */
-/* Batch certificate generation — one combined PDF with one page per
-   eligible exam (passed, not a retry) within the chosen month. Reuses
-   the exact same drawCertificate() used for individual shares, so the
-   design always stays in sync automatically. */
-async function generateBatchCertificatesPDF(monthStr, btnEl){
-  if(btnEl) btnEl.disabled = true;
-  const errEl = document.getElementById('batch-cert-error');
-  if(errEl) errEl.textContent = '';
-  try{
-    if(!window.jspdf || !window.jspdf.jsPDF){
-      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
-      return;
-    }
-    if(!monthStr){ if(errEl) errEl.textContent = 'اختر الشهر أولاً'; return; }
-    const eligible = visibleExams()
-      .filter(e => !e.stoppedEarly && e.score >= 80 && e.date.slice(0,7) === monthStr)
-      .sort((a,b)=> a.studentName.localeCompare(b.studentName, 'ar'));
-    if(eligible.length === 0){
-      showToast('ما في شهادات مستحقة خلال هذا الشهر');
-      return;
-    }
-    showToast(`جاري توليد ${eligible.length} شهادة...`);
-    const { jsPDF } = window.jspdf;
-    let pdf = null;
-    let failedCount = 0;
-    const startedAt = Date.now();
-    for(let i=0; i<eligible.length; i++){
-      showToast(`جاري توليد الشهادة ${i+1} من ${eligible.length}...`);
-      // Yield to the browser between certificates so it actually gets a
-      // chance to paint that progress toast and stay responsive, instead
-      // of running all the canvas work back-to-back on one long block
-      // that can look like a frozen/blank screen on a slower phone.
-      await new Promise(r => setTimeout(r, 0));
-      let canvas;
-      try{
-        // A stuck font load or image decode should not freeze the whole
-        // batch forever — skip that one certificate and keep going
-        // rather than leaving the person staring at "جاري توليد" with
-        // no feedback and no result.
-        canvas = await withTimeout(drawCertificate(eligible[i]), 15000);
-      }catch(e){
-        console.warn('تعذّر توليد شهادة الطالب', eligible[i].studentName, e);
-        failedCount++;
-        continue;
-      }
-      // JPEG instead of PNG: certificates have no transparency to lose,
-      // and this cuts file size drastically (often 5-10x smaller) —
-      // important for a multi-page batch PDF on a mobile connection,
-      // where a huge PNG-based file is the most likely reason nothing
-      // seems to happen after "جاري توليد".
-      const imgData = canvas.toDataURL('image/jpeg', 0.85);
-      if(!pdf){
-        pdf = new jsPDF({ orientation:'l', unit:'pt', format:[canvas.width, canvas.height], compress: true });
-      } else {
-        pdf.addPage([canvas.width, canvas.height], 'l');
-      }
-      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
-    }
-    if(!pdf){
-      showToast('تعذّر توليد أي شهادة — جرّب مرة ثانية أو تحقّق من الاتصال');
-      return;
-    }
-    const successCount = eligible.length - failedCount;
-    const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
-    showToast(`جاري تجهيز الملف (${elapsedSec} ثانية)...`);
-    const [year, month] = monthStr.split('-');
-    const fileName = `شهادات-${year}-${month}.pdf`;
-    const blob = pdf.output('blob');
-
-    // Batch PDFs can get large (many pages) — handing a large file to
-    // the OS share sheet is the more failure-prone path on mobile
-    // (can silently do nothing on some devices/browsers), so batches
-    // always go straight to a direct download instead of navigator.share.
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = fileName;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=> URL.revokeObjectURL(url), 30000);
-    showToast(failedCount>0
-      ? `تم توليد ${successCount} من ${eligible.length} شهادة (تعذّر توليد ${failedCount}) — تحقّق من مجلد التنزيلات`
-      : `تم توليد ${successCount} شهادة بملف واحد — تحقّق من مجلد التنزيلات`);
-  }catch(e){
-    if(e && e.name !== 'AbortError'){
-      console.error(e);
-      showToast('تعذّر توليد الشهادات، حاول مرة ثانية');
-    }
-  }finally{
-    if(btnEl) btnEl.disabled = false;
-  }
-}
-
-async function exportDailyResultsPDF(btnEl){
-  if(btnEl) btnEl.disabled = true;
-  try{
-    if(!window.jspdf || !window.jspdf.jsPDF){
-      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
-      return;
-    }
-    const { canvas, todayExams } = await drawDailyResultsImage();
-    if(todayExams.length === 0){
-      showToast('لا توجد اختبارات مسجّلة اليوم بعد');
-      return;
-    }
-    const imgData = canvas.toDataURL('image/png');
-    const { jsPDF } = window.jspdf;
-    const orientation = canvas.width >= canvas.height ? 'l' : 'p';
-    const pdf = new jsPDF({ orientation, unit:'pt', format:[canvas.width, canvas.height] });
-    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-    const today = todayStamp();
-    const fileName = `نتائج-اليوم-${today}.pdf`;
-    const blob = pdf.output('blob');
-    const file = new File([blob], fileName, { type:'application/pdf' });
-    const title = 'نتائج اختبارات اليوم';
-
-    if(navigator.canShare && navigator.canShare({ files:[file] })){
-      await navigator.share({ files:[file], title, text: title + ' — ' + getCenterSettings().name });
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fileName;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      showToast('تم حفظ نتائج اليوم كملف PDF');
-    }
-  }catch(e){
-    if(e && e.name !== 'AbortError'){
-      console.error(e);
-      showToast('تعذّر إصدار ملف PDF، حاول مرة ثانية');
-    }
-  }finally{
-    if(btnEl) btnEl.disabled = false;
-  }
-}
-
-
-/* ---------------- STATS VIEW ---------------- */
-/* ---------------- DASHBOARD (نظرة عامة) — admin/examiner landing page ---------------- */
 function dashboardView(){
   const todayStr = todayStamp();
   const todayExamsCount = visibleExams().filter(e => e.date.slice(0,10) === todayStr).length;
@@ -3973,7 +3748,7 @@ function statsView(){
 
 function attachStatsHandlers(){
   const btn = document.getElementById('btn-monthly-report-stats');
-  if(btn) btn.onclick = ()=> generateMonthlyReport(btn, 'month');
+  if(btn) btn.onclick = ()=> openMonthlyReportPicker(btn);
   const ybtn = document.getElementById('btn-yearly-report-stats');
   if(ybtn) ybtn.onclick = ()=> generateMonthlyReport(ybtn, 'year');
 }
