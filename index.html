@@ -284,6 +284,13 @@ body{
 .btn-report:disabled{ opacity:0.6; cursor:default; }
 .btn-report svg{ width:16px; height:16px; }
 
+ .report-period-picker{
+  display:flex; gap:8px; width:100%; margin-bottom:10px;
+}
+.report-period-picker select{
+  flex:1; padding:10px; border:1.5px solid var(--line); border-radius:9px;
+  font-family:'Tajawal'; font-size:13px; background:var(--paper); color:var(--ink);
+}
 .filters-panel{ background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:14px; }
 .filters-row{ display:flex; gap:8px; margin-bottom:8px; }
 .filters-row:last-child{ margin-bottom:0; }
@@ -1971,75 +1978,6 @@ function testSetupView(){
    Mushaf. Fetched once per juz from the public alquran.cloud API and
    cached in localStorage afterward, so it keeps working offline for
    every juz that's ever been opened before. */
-let quranPanelOpen = false;
-let quranPanelActiveJuz = null;
-let quranPanelData = {}; // juzNumber -> { ayahs } | { error }
-let quranPanelLoading = false;
-
-async function loadJuzQuranText(juzNum){
-  if(quranPanelData[juzNum]) return quranPanelData[juzNum];
-  const cacheKey = 'quran_juz_' + juzNum;
-  try{
-    const cached = localStorage.getItem(cacheKey);
-    if(cached){
-      const ayahs = JSON.parse(cached);
-      quranPanelData[juzNum] = { ayahs };
-      return quranPanelData[juzNum];
-    }
-  }catch(e){}
-  try{
-    const res = await fetch(`https://api.alquran.cloud/v1/juz/${juzNum}/quran-uthmani`);
-    if(!res.ok) throw new Error('network');
-    const json = await res.json();
-    const ayahs = (json && json.data && json.data.ayahs) || [];
-    if(!ayahs.length) throw new Error('empty');
-    try{ localStorage.setItem(cacheKey, JSON.stringify(ayahs)); }catch(e){}
-    quranPanelData[juzNum] = { ayahs };
-  }catch(e){
-    quranPanelData[juzNum] = { error: true };
-  }
-  return quranPanelData[juzNum];
-}
-
-function quranTextPanelHTML(){
-  const juzNums = (String(testForm.juz).match(/\d+/g) || []).map(Number);
-  if(!juzNums.length) return '';
-  if(!quranPanelActiveJuz || !juzNums.includes(quranPanelActiveJuz)) quranPanelActiveJuz = juzNums[0];
-  const entry = quranPanelData[quranPanelActiveJuz];
-
-  let body;
-  if(quranPanelLoading && !entry){
-    body = `<div style="text-align:center; padding:30px 0; color:var(--ink-soft); font-size:13px;">جاري تحميل نص الجزء...</div>`;
-  } else if(!entry){
-    body = `<div style="text-align:center; padding:30px 0; color:var(--ink-soft); font-size:13px;">دوس "تحميل" حتى يظهر نص الجزء.</div>`;
-  } else if(entry.error){
-    body = `<div style="text-align:center; padding:20px 0; color:var(--red); font-size:12.5px;">تعذّر تحميل النص — تأكد من الاتصال بالإنترنت أول مرة (بعدها بيضل محفوظ ويشتغل بدون نت).</div>`;
-  } else {
-    let lastSurah = null;
-    body = entry.ayahs.map(a=>{
-      const surahName = a.surah && a.surah.name;
-      const header = surahName && surahName !== lastSurah
-        ? (()=>{ lastSurah = surahName; return `<div style="text-align:center; font-family:'Amiri',serif; font-weight:700; font-size:17px; color:var(--gold); margin:14px 0 8px; padding-bottom:6px; border-bottom:1px solid var(--line);">${escapeHtml(surahName)}</div>`; })()
-        : '';
-      return header + `<span style="font-family:'Amiri',serif; font-size:19px; line-height:2.1; color:var(--ink);">${escapeHtml(a.text)} <span style="font-size:13px; color:var(--gold); font-weight:700;">﴿${a.numberInSurah}﴾</span></span> `;
-    }).join('');
-  }
-
-  return `
-  <div class="settings-block" style="margin-top:4px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
-      <h3 style="margin:0;">📖 نص الجزء</h3>
-      ${juzNums.length > 1 ? `
-      <select id="quran-panel-juz-select" style="font-size:12px; padding:4px 8px; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink); font-family:'Tajawal';">
-        ${juzNums.map(n=>`<option value="${n}" ${n===quranPanelActiveJuz?'selected':''}>الجزء ${juzOrdinal(n)}</option>`).join('')}
-      </select>` : ''}
-      ${!entry || entry.error ? `<button class="ghost" id="btn-load-quran-text" style="font-size:12px; padding:5px 10px;">تحميل</button>` : ''}
-    </div>
-    <div id="quran-panel-body" style="max-height:340px; overflow-y:auto; text-align:justify; padding:4px 2px; direction:rtl;">${body}</div>
-  </div>
-  `;
-}
-
 function testScoringView(){
   const score = currentScore();
   return `
@@ -2048,11 +1986,6 @@ function testScoringView(){
     <div class="scoring-meta">المحفّظ: <b>${escapeHtml(testForm.teacherName)}</b> · ${escapeHtml(formatJuzRange(testForm.juz))}</div>
     <div class="scoring-meta">⏱ مدة الاختبار: <b id="exam-timer">${formatDuration(elapsedExamSeconds())}</b></div>
   </div>
-
-  <button type="button" id="btn-toggle-quran-panel" class="btn btn-ghost" style="width:100%; margin-bottom:10px;">
-    ${quranPanelOpen ? 'إخفاء نص الجزء 📖' : 'عرض نص الجزء (بدل المصحف) 📖'}
-  </button>
-  ${quranPanelOpen ? quranTextPanelHTML() : ''}
 
   <div class="score-panel">
     <div class="score-num">${score}</div>
@@ -2181,38 +2114,6 @@ function attachTestScoringHandlers(){
 
   const notesEl = document.getElementById('f-scoring-notes');
   if(notesEl) notesEl.oninput = ()=>{ testForm.notes = notesEl.value; saveDraft(); };
-
-  const toggleQuranBtn = document.getElementById('btn-toggle-quran-panel');
-  if(toggleQuranBtn) toggleQuranBtn.onclick = ()=>{
-    quranPanelOpen = !quranPanelOpen;
-    if(quranPanelOpen && !quranPanelActiveJuz){
-      const juzNums = (String(testForm.juz).match(/\d+/g) || []).map(Number);
-      quranPanelActiveJuz = juzNums[0] || null;
-    }
-    if(quranPanelOpen && quranPanelActiveJuz && !quranPanelData[quranPanelActiveJuz]){
-      quranPanelLoading = true;
-      loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
-    }
-    rerenderTestOnly();
-  };
-
-  const quranJuzSelect = document.getElementById('quran-panel-juz-select');
-  if(quranJuzSelect) quranJuzSelect.onchange = ()=>{
-    quranPanelActiveJuz = Number(quranJuzSelect.value);
-    if(!quranPanelData[quranPanelActiveJuz]){
-      quranPanelLoading = true;
-      loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
-    }
-    rerenderTestOnly();
-  };
-
-  const loadQuranBtn = document.getElementById('btn-load-quran-text');
-  if(loadQuranBtn) loadQuranBtn.onclick = ()=>{
-    delete quranPanelData[quranPanelActiveJuz];
-    quranPanelLoading = true;
-    rerenderTestOnly();
-    loadJuzQuranText(quranPanelActiveJuz).finally(()=>{ quranPanelLoading = false; rerenderTestOnly(); });
-  };
 
   document.querySelectorAll('.deduct-btn').forEach(b=>{
     b.onclick = ()=>{
@@ -2350,7 +2251,15 @@ function historyView(){
     <div class="stat-card"><div class="num">${exams.length}</div><div class="lbl">إجمالي الاختبارات</div></div>
     <div class="stat-card"><div class="num">${uniqueStudents}</div><div class="lbl">عدد الطلاب المختبَرين</div></div>
   </div>
-  <div class="history-toolbar">
+    <div class="report-period-picker">
+    <select id="report-month-select" aria-label="الشهر">
+      ${Array.from({length:12},(_,i)=>`<option value="${i}" ${i===new Date().getMonth()?'selected':''}>${new Date(2000,i,1).toLocaleDateString('ar-EG',{month:'long'})}</option>`).join('')}
+    </select>
+    <select id="report-year-select" aria-label="السنة">
+      ${Array.from({length:5},(_,i)=>{ const y=new Date().getFullYear()-i; return `<option value="${y}" ${i===0?'selected':''}>${y}</option>`; }).join('')}
+    </select>
+  </div>
+<div class="history-toolbar">
     <button class="btn-report" id="btn-monthly-report">${iconReport()} تقرير شهري</button>
     <button class="btn-report" id="btn-daily-png">${iconShare()} نتائج اليوم PNG</button>
     <button class="btn-report" id="btn-daily-pdf">${iconShare()} نتائج اليوم PDF</button>
@@ -2489,7 +2398,11 @@ function attachHistoryHandlers(){
   refreshHistoryList();
 
   const reportBtn = document.getElementById('btn-monthly-report');
-  if(reportBtn) reportBtn.onclick = ()=> generateMonthlyReport(reportBtn);
+  if(reportBtn) reportBtn.onclick = ()=>{
+    const month = Number(document.getElementById('report-month-select')?.value ?? new Date().getMonth());
+    const year = Number(document.getElementById('report-year-select')?.value ?? new Date().getFullYear());
+    generateMonthlyReport(reportBtn, 'month', year, month);
+  };
 
   const dailyPngBtn = document.getElementById('btn-daily-png');
   if(dailyPngBtn) dailyPngBtn.onclick = ()=> exportDailyResults(dailyPngBtn);
@@ -3336,47 +3249,57 @@ function drawScoreChart(canvas, examsAsc){
 }
 
 /* ---------------- PERIOD REPORT (شهري / سنوي) ---------------- */
-async function drawMonthlyReport(period){
+async function drawMonthlyReport(period, targetYear, targetMonth){
   period = period || 'month';
+  const now = new Date();
+  const year = Number.isFinite(Number(targetYear)) ? Number(targetYear) : now.getFullYear();
+  const month = Number.isFinite(Number(targetMonth)) ? Number(targetMonth) : now.getMonth();
+
   await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
   await loadLogoImage();
-  const now = new Date();
+
   const periodLabel = period==='year'
-    ? now.toLocaleDateString('ar-EG', {year:'numeric'})
-    : now.toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
+    ? String(year)
+    : new Date(year, month, 1).toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
+
   const periodExams = visibleExams().filter(e=>{
     const d = new Date(e.date);
-    if(period==='year') return d.getFullYear()===now.getFullYear();
-    return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
+    if(Number.isNaN(d.getTime())) return false;
+    if(period==='year') return d.getFullYear()===year;
+    return d.getFullYear()===year && d.getMonth()===month;
   });
 
   const byStudent = {};
   periodExams.forEach(e=>{
-    const key = e.studentName.trim();
-    if(!byStudent[key] || new Date(e.date) > new Date(byStudent[key].date)){
-      byStudent[key] = { ...byStudent[key], date: e.date, teacherName: e.teacherName };
+    const key = String(e.studentName || '').trim();
+    if(!key) return;
+    if(!byStudent[key]) byStudent[key] = { count:0, total:0, date:e.date, teacherName:e.teacherName||'—' };
+    if(new Date(e.date) > new Date(byStudent[key].date)){
+      byStudent[key].date = e.date;
+      byStudent[key].teacherName = e.teacherName || byStudent[key].teacherName;
     }
-    byStudent[key].count = (byStudent[key].count||0) + 1;
-    byStudent[key].total = (byStudent[key].total||0) + e.score;
+    byStudent[key].count += 1;
+    byStudent[key].total += Number(e.score)||0;
   });
+
   const rows = Object.keys(byStudent)
     .map(name => ({
-      name, count: byStudent[name].count,
-      avg: Math.round(byStudent[name].total / byStudent[name].count),
+      name,
+      count: byStudent[name].count,
+      avg: Math.round((byStudent[name].total / byStudent[name].count)*10)/10,
       teacherName: byStudent[name].teacherName,
       date: byStudent[name].date,
     }))
-    .sort((a,b)=> b.count - a.count);
+    .sort((a,b)=> b.avg-a.avg || b.count-a.count);
 
+  const bestStudent = getBestStudentFromExams(periodExams, 2);
   const maxRows = 14;
   const shownRows = rows.slice(0, maxRows);
   const extra = rows.length - shownRows.length;
-  const avgAll = periodExams.length ? Math.round(periodExams.reduce((s,e)=>s+e.score,0)/periodExams.length) : 0;
+  const avgAll = periodExams.length ? Math.round(periodExams.reduce((s,e)=>s+(Number(e.score)||0),0)/periodExams.length*10)/10 : 0;
 
-  const W = 1500;
-  const rowH = 58;
-  const tableTop = 615;
-  const H = tableTop + 60 + shownRows.length*rowH + (extra>0?36:0) + 190;
+  const W = 1500, rowH = 58, tableTop = 615;
+  const H = tableTop + 60 + shownRows.length*rowH + (extra>0?36:0) + 245;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
@@ -3390,13 +3313,10 @@ async function drawMonthlyReport(period){
   ctx.fillText(period==='year' ? 'التقرير السنوي' : 'التقرير الشهري', W/2, 335);
   drawFlourish(ctx, W/2-180, 325, 14, PAL.gold);
   drawFlourish(ctx, W/2+180, 325, 14, PAL.gold);
-
   drawPillBadge(ctx, W/2, 385, periodLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
 
-  // Stat cards
   const cardW = 380, cardH = 108, gap = 30, cardY = 435;
-  const totalW = cardW*3 + gap*2;
-  const startX = (W-totalW)/2;
+  const totalW = cardW*3 + gap*2, startX = (W-totalW)/2;
   const cardsData = [
     { val: avgAll, lbl: 'متوسط الدرجات', icon:'star' },
     { val: rows.length, lbl: 'عدد الطلاب', icon:'people' },
@@ -3413,7 +3333,6 @@ async function drawMonthlyReport(period){
     ctx.closePath();
     ctx.fillStyle = '#fff'; ctx.fill();
     ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
-
     drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
     ctx.textAlign = 'center';
     ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
@@ -3422,7 +3341,6 @@ async function drawMonthlyReport(period){
     ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
   });
 
-  // Table
   const tX = startX, tW = totalW;
   const colWidths = { name:0.27, teacher:0.24, date:0.19, count:0.15, avg:0.15 };
   const cols = [
@@ -3432,7 +3350,6 @@ async function drawMonthlyReport(period){
     { key:'count', label:'عدد الاختبارات', w: tW*colWidths.count },
     { key:'avg', label:'متوسط الدرجة', w: tW*colWidths.avg },
   ];
-  // header row (rightmost column = اسم الطالب, matching RTL reading order)
   let cx = tX + tW;
   ctx.font = "700 19px 'Tajawal'";
   cols.forEach(col=>{
@@ -3441,8 +3358,7 @@ async function drawMonthlyReport(period){
     ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(x0, tableTop, col.w, 54);
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
     ctx.fillText(col.label, x0+col.w/2, tableTop+34);
-    col._x0 = x0;
-    cx = x0;
+    col._x0 = x0; cx = x0;
   });
 
   ctx.font = "500 18px 'Tajawal'";
@@ -3454,10 +3370,7 @@ async function drawMonthlyReport(period){
     const dateStr = d.toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
     const values = { name:row.name, teacher:row.teacherName, date:dateStr, count:String(row.count), avg:String(row.avg) };
     ctx.fillStyle = PAL.ink;
-    cols.forEach(col=>{
-      ctx.textAlign = 'center';
-      ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6);
-    });
+    cols.forEach(col=>{ ctx.textAlign='center'; ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6); });
   });
   ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
   ctx.strokeRect(tX, tableTop, tW, 54 + shownRows.length*rowH);
@@ -3469,40 +3382,43 @@ async function drawMonthlyReport(period){
     afterTableY += 34;
   }
 
-  // Dua plaque
-  const plaqueW = 620, plaqueH = 110, plaqueX = W/2-plaqueW/2, plaqueY = afterTableY+10;
+  const plaqueW = 760, plaqueH = 130, plaqueX = W/2-plaqueW/2, plaqueY = afterTableY+10;
   ctx.beginPath();
-  ctx.moveTo(plaqueX+30, plaqueY);
-  ctx.lineTo(plaqueX+plaqueW-30, plaqueY);
+  ctx.moveTo(plaqueX+30, plaqueY); ctx.lineTo(plaqueX+plaqueW-30, plaqueY);
   ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY, plaqueX+plaqueW, plaqueY+plaqueH/2);
   ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY+plaqueH, plaqueX+plaqueW-30, plaqueY+plaqueH);
   ctx.lineTo(plaqueX+30, plaqueY+plaqueH);
   ctx.quadraticCurveTo(plaqueX, plaqueY+plaqueH, plaqueX, plaqueY+plaqueH/2);
   ctx.quadraticCurveTo(plaqueX, plaqueY, plaqueX+30, plaqueY);
   ctx.closePath();
-  ctx.fillStyle = '#fff'; ctx.fill();
-  ctx.strokeStyle = PAL.gold; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = PAL.green; ctx.font = "600 21px 'Tajawal'"; ctx.textAlign = 'center';
-  ctx.fillText('نسأل الله أن يتقبل من الجميع', W/2, plaqueY+45);
-  ctx.fillText('وأن يجعل القرآن نوراً لهم في الدنيا والآخرة', W/2, plaqueY+78);
+  ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = PAL.gold; ctx.lineWidth = 2; ctx.stroke();
+
+  ctx.fillStyle = PAL.green; ctx.textAlign = 'center'; ctx.font = "700 21px 'Tajawal'";
+  ctx.fillText(bestStudent ? `أفضل طالب بالاختبارات: ${bestStudent.name}` : 'أفضل طالب بالاختبارات: لا يوجد بعد', W/2, plaqueY+43);
+  ctx.font = "600 17px 'Tajawal'";
+  ctx.fillText(
+    bestStudent ? `المتوسط ${bestStudent.avg} من ${bestStudent.count} اختبارات — يُشترط اختباران فأكثر` : 'يُحتسب أفضل طالب بعد توفر اختبارين فأكثر لطالب واحد على الأقل',
+    W/2, plaqueY+76
+  );
+  ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'";
+  ctx.fillText('نسأل الله أن يتقبل من الجميع ويجعل القرآن نوراً لهم في الدنيا والآخرة', W/2, plaqueY+108);
 
   return { canvas, monthExams: periodExams };
 }
 
-async function generateMonthlyReport(btnEl, period){
+async function generateMonthlyReport(btnEl, period, targetYear, targetMonth){
   period = period || 'month';
   if(btnEl) btnEl.disabled = true;
   try{
-    const { canvas, monthExams } = await drawMonthlyReport(period);
+    const { canvas, monthExams } = await drawMonthlyReport(period, targetYear, targetMonth);
     if(monthExams.length === 0){
-      showToast(period==='year' ? 'لا توجد اختبارات مسجّلة هالسنة بعد' : 'لا توجد اختبارات مسجّلة هذا الشهر بعد');
+      showToast(period==='year' ? 'لا توجد اختبارات مسجّلة في السنة المحددة' : 'لا توجد اختبارات مسجّلة في الشهر المحدد');
       return;
     }
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-    const now = new Date();
-    const fileName = period==='year'
-      ? `تقرير-سنوي-${now.getFullYear()}.png`
-      : `تقرير-شهري-${now.getFullYear()}-${now.getMonth()+1}.png`;
+    const year = Number(targetYear) || new Date().getFullYear();
+    const month = Number.isFinite(Number(targetMonth)) ? Number(targetMonth) : new Date().getMonth();
+    const fileName = period==='year' ? `تقرير-سنوي-${year}.png` : `تقرير-شهري-${year}-${month+1}.png`;
     const file = new File([blob], fileName, { type:'image/png' });
     const title = period==='year' ? 'التقرير السنوي' : 'التقرير الشهري';
 
@@ -3517,10 +3433,7 @@ async function generateMonthlyReport(btnEl, period){
       showToast(period==='year' ? 'تم حفظ التقرير السنوي كصورة' : 'تم حفظ التقرير الشهري كصورة');
     }
   }catch(e){
-    if(e && e.name !== 'AbortError'){
-      console.error(e);
-      showToast('تعذّر إصدار التقرير، حاول مرة ثانية');
-    }
+    if(e && e.name !== 'AbortError'){ console.error(e); showToast('تعذّر إصدار التقرير، حاول مرة ثانية'); }
   }finally{
     if(btnEl) btnEl.disabled = false;
   }
@@ -3894,6 +3807,29 @@ function attachDashboardHandlers(){
   if(studentsBtn) studentsBtn.onclick = ()=>{ state.view = 'students'; render(); };
 }
 
+function getBestStudentFromExams(exams, minExams=2){
+  const scores = {};
+  (exams || []).forEach(e=>{
+    const name = String(e.studentName || '').trim();
+    if(!name) return;
+    if(!scores[name]) scores[name] = { total:0, count:0, min:101, max:0 };
+    const score = Number(e.score) || 0;
+    scores[name].total += score;
+    scores[name].count += 1;
+    scores[name].min = Math.min(scores[name].min, score);
+    scores[name].max = Math.max(scores[name].max, score);
+  });
+  const eligible = Object.entries(scores)
+    .filter(([,d])=>d.count >= minExams)
+    .map(([name,d])=>({
+      name, count:d.count,
+      avg:Math.round((d.total/d.count)*10)/10,
+      min:d.min, max:d.max
+    }))
+    .sort((a,b)=>b.avg-a.avg || b.count-a.count || b.min-a.min || b.max-a.max);
+  return eligible[0] || null;
+}
+
 function statsView(){
   const studentCounts = {}, teacherCounts = {}, studentScores = {};
   state.exams.forEach(e=>{
@@ -3908,9 +3844,7 @@ function statsView(){
   const uniqueStudents = Object.keys(studentCounts).length;
   const topStudent = Object.entries(studentCounts).sort((a,b)=>b[1]-a[1])[0];
   const topTeacher = Object.entries(teacherCounts).sort((a,b)=>b[1]-a[1])[0];
-  const bestStudent = Object.entries(studentScores)
-    .map(([name,d])=>({ name, avg: Math.round(d.total/d.count) }))
-    .sort((a,b)=> b.avg-a.avg)[0];
+  const bestStudent = getBestStudentFromExams(state.exams, 2);
 
   return `
   <div class="section-title">الإحصاءات</div>
@@ -3947,7 +3881,7 @@ function statsView(){
     <div class="hc-body">
       <div class="hc-lbl">أفضل طالب بالاختبارات</div>
       <div class="hc-val">${bestStudent ? escapeHtml(bestStudent.name) : '—'}</div>
-      <div class="hc-sub">${bestStudent ? 'بمتوسط ' + bestStudent.avg : ''}</div>
+      <div class="hc-sub">${bestStudent ? `بمتوسط ${bestStudent.avg} من ${bestStudent.count} اختبارات` : 'يُحتسب الطالب بعد اختبارين فأكثر'}</div>
     </div>
   </div>
 
@@ -3972,7 +3906,15 @@ function statsView(){
   })()}
 
   <div class="section-title" style="margin-top:22px;">التقارير</div>
-  <div class="history-toolbar">
+    <div class="report-period-picker">
+    <select id="report-month-select" aria-label="الشهر">
+      ${Array.from({length:12},(_,i)=>`<option value="${i}" ${i===new Date().getMonth()?'selected':''}>${new Date(2000,i,1).toLocaleDateString('ar-EG',{month:'long'})}</option>`).join('')}
+    </select>
+    <select id="report-year-select" aria-label="السنة">
+      ${Array.from({length:5},(_,i)=>{ const y=new Date().getFullYear()-i; return `<option value="${y}" ${i===0?'selected':''}>${y}</option>`; }).join('')}
+    </select>
+  </div>
+<div class="history-toolbar">
     <button class="btn-report" id="btn-monthly-report-stats">${iconReport()} تقرير شهري</button>
     <button class="btn-report" id="btn-yearly-report-stats">${iconReport()} تقرير سنوي</button>
   </div>
@@ -3981,9 +3923,16 @@ function statsView(){
 
 function attachStatsHandlers(){
   const btn = document.getElementById('btn-monthly-report-stats');
-  if(btn) btn.onclick = ()=> generateMonthlyReport(btn, 'month');
+  if(btn) btn.onclick = ()=>{
+    const month = Number(document.getElementById('report-month-select')?.value ?? new Date().getMonth());
+    const year = Number(document.getElementById('report-year-select')?.value ?? new Date().getFullYear());
+    generateMonthlyReport(btn, 'month', year, month);
+  };
   const ybtn = document.getElementById('btn-yearly-report-stats');
-  if(ybtn) ybtn.onclick = ()=> generateMonthlyReport(ybtn, 'year');
+  if(ybtn) ybtn.onclick = ()=>{
+    const year = Number(document.getElementById('report-year-select')?.value ?? new Date().getFullYear());
+    generateMonthlyReport(ybtn, 'year', year);
+  };
 }
 
 /* ---------------- STUDENTS VIEW ---------------- */
