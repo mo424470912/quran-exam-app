@@ -2079,6 +2079,26 @@ function attachTestSetupHandlers(){
 
     testForm.studentName = testForm.studentName.trim();
     testForm.teacherName = testForm.teacherName.trim();
+
+    // Gate 1: parts that require passing the cumulative ("تجميعي")
+    // checkpoint exam first.
+    const selectedJuzNums = (String(testForm.juz).match(/\d+/g)||[]).map(Number);
+    const needsCumulativeCheck = selectedJuzNums.some(n=>CUMULATIVE_CHECKPOINT_JUZ.includes(n));
+    if(needsCumulativeCheck){
+      const passedCumulative = confirm('تذكير: هل اجتاز الطالب الاختبار التجميعي قبل التقدم لهذا الاختبار؟\n\nاضغط "موافق" = نعم، أو "إلغاء" = لا.');
+      if(!passedCumulative){
+        const skipAnyway = confirm('يرجى التقدم إلى الاختبار التجميعي قبل هذا الاختبار.\n\nهذا استثناء: إذا بدك كمختبِر تتجاوز هذا الشرط وتدخل الطالب على الاختبار رغم ذلك، دوس "موافق". وإلا دوس "إلغاء" للرجوع.');
+        if(!skipAnyway) return;
+      }
+    }
+
+    // Gate 2: student failed their last exam within the past week.
+    const cooldownReason = studentTestCooldownBlockedReason(testForm.studentName);
+    if(cooldownReason){
+      const skipAnyway = confirm(cooldownReason + '\n\nهذا استثناء: إذا بدك كمختبِر تتجاوز هذا الشرط وتدخل الطالب على الاختبار الآن، دوس "موافق". وإلا دوس "إلغاء" للرجوع.');
+      if(!skipAnyway) return;
+    }
+
     testForm.clicks = [];
     testForm.questionsDone = [false,false,false,false,false];
     testForm.stage = 'scoring';
@@ -2203,6 +2223,7 @@ let historySearch = '';
 let historyFilters = { score: 'all', juz: '', dateFrom: '', dateTo: '' };
 let historyVisibleCount = 20;
 let editingTeacherRecordId = null; // exam.id currently showing the "edit teacher" inline form (admin/examiner only)
+let editingScoreRecordId = null; // exam.id currently showing the "edit score" inline form (admin/examiner only)
 const HISTORY_PAGE_SIZE = 20;
 
 function applyHistoryFilters(list){
@@ -2285,6 +2306,7 @@ function renderRecords(list, totalCount){
     return `<div class="empty-state">لا توجد نتائج اختبارات ${(historySearch || historyFilters.score!=='all' || historyFilters.juz || historyFilters.dateFrom || historyFilters.dateTo) ? 'مطابقة لبحثك/فلاترك' : 'بعد'}</div>`;
   }
   const canEditTeacher = state.currentRole !== 'teacher';
+  const canEditScore = state.currentRole !== 'teacher';
   const cards = list.map(r=>{
     const isRetry = !!r.stoppedEarly;
     const scoreClass = isRetry ? 'score-low' : (r.score>=90 ? 'score-high' : r.score>=80 ? 'score-mid' : 'score-low');
@@ -2292,12 +2314,26 @@ function renderRecords(list, totalCount){
     const d = new Date(r.date);
     const dateStr = d.toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
     const isEditingTeacher = canEditTeacher && editingTeacherRecordId === r.id;
+    const isEditingScore = canEditScore && editingScoreRecordId === r.id;
     return `
     <div class="record${alertClass}">
       <div class="record-top">
         <div class="name">${escapeHtml(r.studentName)}</div>
-        <div class="record-score ${scoreClass}">${isRetry ? 'إعادة' : r.score}</div>
+        ${isEditingScore ? `
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="number" min="0" max="100" step="0.5" class="score-edit-input" data-id="${r.id}" value="${isRetry ? 0 : r.score}" style="width:64px;font-family:'Tajawal';font-size:13px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);">
+          <label style="font-size:11px;display:flex;align-items:center;gap:3px;white-space:nowrap;">
+            <input type="checkbox" class="score-edit-retry" data-id="${r.id}" ${isRetry?'checked':''}> إعادة
+          </label>
+        </div>
+        ` : `<div class="record-score ${scoreClass}">${isRetry ? 'إعادة' : r.score}</div>`}
       </div>
+      ${isEditingScore ? `
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin:-4px 0 6px;">
+        <button class="score-edit-save" data-id="${r.id}" style="font-size:11px;padding:2px 8px;">حفظ</button>
+        <button class="score-edit-cancel" style="font-size:11px;padding:2px 8px;">إلغاء</button>
+      </div>
+      ` : ''}
       <div class="record-meta">
         ${isEditingTeacher ? `
         <span>المحفّظ:</span>
@@ -2318,6 +2354,7 @@ function renderRecords(list, totalCount){
           return st && st.phone ? `<button class="record-whatsapp" data-id="${r.id}">${iconWhatsappSvg()} إرسال لولي الأمر</button>` : '';
         })()}
         ${canEditTeacher && !isEditingTeacher ? `<button class="record-edit-teacher" data-id="${r.id}">تعديل المحفّظ</button>` : ''}
+        ${canEditScore && !isEditingScore ? `<button class="record-edit-score" data-id="${r.id}">تعديل العلامة</button>` : ''}
         ${state.currentRole!=='teacher' ? `<button class="record-del" data-id="${r.id}">حذف السجل</button>` : ''}
       </div>
     </div>`;
@@ -2335,6 +2372,7 @@ function refreshHistoryList(){
   attachDeleteHandlers();
   attachShareHandlers();
   attachTeacherEditHandlers();
+  attachScoreEditHandlers();
   const loadMoreBtn = document.getElementById('btn-load-more');
   if(loadMoreBtn) loadMoreBtn.onclick = ()=>{
     historyVisibleCount += HISTORY_PAGE_SIZE;
@@ -2450,6 +2488,64 @@ function attachTeacherEditHandlers(){
         showToast('تم تحديث اسم المحفّظ');
       }
       editingTeacherRecordId = null;
+      refreshHistoryList();
+    };
+  });
+}
+
+// Recomputes a student's juzProgress from scratch, from their current
+// exam history — used after a score edit so a corrected score properly
+// adds/removes a completed juz (passing exams add it; a score walked
+// back below 80, or marked إعادة, correctly drops it again, unless
+// another passing exam for that juz still backs it up).
+function recomputeJuzProgressForStudent(studentNameTrimmedLower){
+  const student = state.students.find(s => s.name.trim().toLowerCase()===studentNameTrimmedLower);
+  if(!student) return;
+  student.juzProgress = [];
+  state.exams
+    .filter(e => e.studentName.trim().toLowerCase()===studentNameTrimmedLower && !e.stoppedEarly && e.score >= 80)
+    .forEach(e=>{
+      (String(e.juz).match(/\d+/g) || []).map(Number).forEach(n=>{
+        if(n>=1 && n<=30 && !student.juzProgress.includes(n)) student.juzProgress.push(n);
+      });
+    });
+}
+
+// Lets admin/examiner correct a previously-recorded score (typo while
+// scoring, wrong button pressed, etc.) directly from the history list,
+// and keeps the student's completed-juz list consistent with the
+// corrected score.
+function attachScoreEditHandlers(){
+  document.querySelectorAll('.record-edit-score').forEach(b=>{
+    b.onclick = ()=>{
+      editingScoreRecordId = b.dataset.id;
+      refreshHistoryList();
+    };
+  });
+  document.querySelectorAll('.score-edit-cancel').forEach(b=>{
+    b.onclick = ()=>{
+      editingScoreRecordId = null;
+      refreshHistoryList();
+    };
+  });
+  document.querySelectorAll('.score-edit-save').forEach(b=>{
+    b.onclick = async ()=>{
+      const id = b.dataset.id;
+      const input = document.querySelector(`.score-edit-input[data-id="${id}"]`);
+      const retryCb = document.querySelector(`.score-edit-retry[data-id="${id}"]`);
+      const exam = state.exams.find(e=>e.id===id);
+      if(exam && input){
+        let newScore = parseFloat(input.value);
+        if(isNaN(newScore)) newScore = 0;
+        newScore = Math.max(0, Math.min(100, newScore));
+        exam.score = newScore;
+        exam.stoppedEarly = !!(retryCb && retryCb.checked);
+        recomputeJuzProgressForStudent(exam.studentName.trim().toLowerCase());
+        await saveExams();
+        await saveStudents();
+        showToast('تم تحديث العلامة');
+      }
+      editingScoreRecordId = null;
       refreshHistoryList();
     };
   });
@@ -3278,8 +3374,13 @@ async function drawMonthlyReport(period, monthStr){
     }))
     .sort((a,b)=> b.count - a.count);
 
-  const maxRows = 14;
-  const shownRows = rows.slice(0, maxRows);
+  // Show every passing student individually — no cutoff. (Previously
+  // capped at 14 rows sorted by exam count, which silently dropped
+  // students with fewer exams into a "و X آخرين" summary even though
+  // they passed — e.g. a student with one 92 would vanish behind
+  // students who simply tested more times. The canvas height below
+  // already scales to the row count, so there's no layout reason to cap it.)
+  const shownRows = rows;
   const extra = rows.length - shownRows.length;
   const passingExams = periodExams.filter(e=> !e.stoppedEarly && e.score >= 80);
   const avgAll = passingExams.length ? Math.round(passingExams.reduce((s,e)=>s+e.score,0)/passingExams.length) : 0;
@@ -4105,6 +4206,32 @@ function isAllowedBookingDay(dateStr){
 function bookingDayCount(dateStr){
   return state.schedule.filter(s=>s.date===dateStr && !s.done).length;
 }
+/* Juz' that require having passed a cumulative ("تجميعي") checkpoint
+   exam first, per the center's curriculum. Selecting any of these when
+   starting a new test triggers a reminder prompt before the examiner
+   can proceed (see attachTestSetupHandlers → btn-start-test). */
+const CUMULATIVE_CHECKPOINT_JUZ = [27, 25, 22, 19, 17];
+
+/* Mirrors studentBookingBlockedReason's 7-day fail cooldown, but for
+   actually entering the test-scoring page (not just booking a slot):
+   a student whose most recent exam was a fail/retry within the last
+   week can't be scored again until the cooldown passes, unless the
+   examiner explicitly overrides it. */
+function studentTestCooldownBlockedReason(studentName){
+  const trimmed = (studentName||'').trim();
+  if(!trimmed) return null;
+  const examsForStudent = state.exams.filter(e=>e.studentName.trim()===trimmed).sort((a,b)=> new Date(b.date)-new Date(a.date));
+  if(!examsForStudent.length) return null;
+  const last = examsForStudent[0];
+  const isFail = last.stoppedEarly || last.score < 80;
+  if(!isFail) return null;
+  const daysSince = (Date.now() - new Date(last.date).getTime()) / (1000*60*60*24);
+  if(daysSince >= BOOKING_FAIL_COOLDOWN_DAYS) return null;
+  const daysLeft = Math.max(1, Math.ceil(BOOKING_FAIL_COOLDOWN_DAYS - daysSince));
+  const daysWord = daysLeft===1 ? 'يوم واحد' : daysLeft===2 ? 'يومين' : `${daysLeft} أيام`;
+  return `الطالب لم يجتز آخر اختبار تقدّم له — ممنوع يعيد الاختبار إلا بعد أسبوع من تاريخ الاختبار الذي لم يجتزه (متبقي تقريباً ${daysWord}).`;
+}
+
 function studentBookingBlockedReason(studentName){
   const trimmed = (studentName||'').trim();
   if(!trimmed) return null;
