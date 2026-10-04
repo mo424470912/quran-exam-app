@@ -6,7 +6,7 @@
 // worker only handles the *app shell* — the HTML/CSS/JS/fonts/icons —
 // so the page itself loads even with zero connectivity.
 
-const CACHE_NAME = 'quran-exam-app-v1';
+const CACHE_NAME = 'quran-exam-app-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -42,20 +42,42 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Strategy: try the network first (to pick up app updates when online),
-// fall back to the cache when offline. Firestore reads/writes go
-// straight to Firebase's own SDK (not through this fetch handler in a
-// way that matters), so this only needs to cover the app shell files.
+// Strategy: cache-first, network-in-the-background ("stale-while-
+// revalidate"). Respond from the cached app shell IMMEDIATELY when
+// it's there — that's what makes offline/weak-connection opens instant
+// instead of hanging while the browser waits on a network request that
+// may stall for many seconds before it finally fails. Any fresher
+// version fetched from the network quietly replaces the cached copy
+// for the *next* open; it never delays the current one. Only when
+// nothing is cached yet (first-ever visit) do we wait on the network,
+// since there's nothing else to show.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
-        return response;
-      })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
+    caches.match(event.request).then((cached) => {
+      const networkUpdate = fetch(event.request)
+        .then((response) => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => null);
+
+      if (cached) {
+        // Fire the network update in the background; don't make the
+        // page wait on it. Swallow any rejection so it doesn't surface
+        // as an "unhandled promise rejection" with nothing awaiting it.
+        networkUpdate.catch(() => {});
+        return cached;
+      }
+
+      // Nothing cached for this request yet — our only option is to
+      // wait for the network, falling back to the cached app shell
+      // (index.html) if even that fails, so navigation still works.
+      return networkUpdate.then((r) => r || caches.match('./index.html'));
+    })
   );
 });
