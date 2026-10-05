@@ -582,6 +582,27 @@ function withTimeout(promise, ms){
 const storageAdapter = {
   async get(key){
     if (firestoreDb) {
+      // Fast path: ask Firestore's local on-device cache FIRST (no
+      // network involved at all), with just a short timeout as a
+      // safety net. When the app has been opened online before, this
+      // resolves in milliseconds even with zero connectivity right
+      // now — this is what fixes the app taking minutes to open
+      // offline: every key used to wait on a full server-timeout
+      // (and a retry of it) before ever touching the cache, which is
+      // instant. Only when the cache read itself fails/misses (a
+      // brand-new device/profile with nothing cached yet) do we fall
+      // through to the slower server-or-cache attempt below.
+      try{
+        const cacheDoc = await withTimeout(
+          firestoreDb.collection('quran_app').doc(key).get({ source: 'cache' }),
+          3000
+        );
+        if(cacheDoc.exists){
+          try{ localStorage.setItem(key, cacheDoc.data().value); }catch(e){}
+          return { value: cacheDoc.data().value };
+        }
+      }catch(e){ /* nothing cached yet (or cache unsupported) — fall through */ }
+
       // A slow-but-real connection (weak wifi, just-installed app on first
       // sync) isn't the same as being offline, and the exams/students
       // documents can be sizeable — give it a more generous timeout, and
@@ -666,18 +687,23 @@ async function flushPendingSync(){
   const keys = getPendingSyncKeys();
   if(!keys.length) return;
   flushingPendingSync = true;
-  let succeeded = 0;
-  for(const key of keys){
+  // Send every pending key at once instead of one after another — with
+  // several keys pending (e.g. after editing offline for a while), a
+  // sequential loop could add many seconds of timeouts back-to-back
+  // before the app even starts loading data.
+  const results = await Promise.all(keys.map(async key=>{
     try{
       const raw = localStorage.getItem(key);
-      if(raw === null){ clearPendingSync(key); continue; } // nothing local to send
+      if(raw === null){ clearPendingSync(key); return false; } // nothing local to send
       await withTimeout(firestoreDb.collection('quran_app').doc(key).set({ value: raw }), 8000);
       clearPendingSync(key);
-      succeeded++;
+      return true;
     }catch(e){
       console.warn('لسا ما انرفعت البيانات لهذا المفتاح، رح يعاد المحاولة لاحقاً', key, e);
+      return false;
     }
-  }
+  }));
+  const succeeded = results.filter(Boolean).length;
   flushingPendingSync = false;
   if(succeeded > 0) showToast('تم رفع البيانات المحفوظة محلياً بنجاح');
   updateAppBadge();
@@ -730,14 +756,24 @@ async function loadAppData(){
   // showed up once back online."
   await flushPendingSync();
 
-  try{
-    const ex = await storageAdapter.get(STORAGE_EXAMS);
-    state.exams = ex ? JSON.parse(ex.value) : [];
-  }catch(e){ state.exams = []; }
-  try{
-    const st = await storageAdapter.get(STORAGE_STUDENTS);
-    state.students = st ? JSON.parse(st.value) : [];
-  }catch(e){ state.students = []; }
+  // These seven keys are independent documents, so fetch them all at
+  // once instead of one after another — previously each await'ed
+  // sequentially, and since every read could take up to several
+  // seconds when offline (see storageAdapter.get above), that added up
+  // to a multi-minute wait before the app could show anything. Fetched
+  // in parallel, the whole batch takes only as long as the single
+  // slowest one.
+  const [ex, st, sc, nt, mz, ib, cs] = await Promise.all([
+    storageAdapter.get(STORAGE_EXAMS).catch(()=>null),
+    storageAdapter.get(STORAGE_STUDENTS).catch(()=>null),
+    storageAdapter.get(STORAGE_SCHEDULE).catch(()=>null),
+    storageAdapter.get(STORAGE_NOTIFICATIONS).catch(()=>null),
+    storageAdapter.get(STORAGE_MEMORIZATION).catch(()=>null),
+    storageAdapter.get(STORAGE_IMPORT_BATCHES).catch(()=>null),
+    storageAdapter.get(STORAGE_CENTER_SETTINGS).catch(()=>null),
+  ]);
+  try{ state.exams = ex ? JSON.parse(ex.value) : []; }catch(e){ state.exams = []; }
+  try{ state.students = st ? JSON.parse(st.value) : []; }catch(e){ state.students = []; }
   // One-time repair: older data may have duplicate student IDs (a past
   // bug where several students created in the same millisecond during
   // a bulk import all got the same id). That makes tapping one
@@ -756,26 +792,11 @@ async function loadAppData(){
     });
     if(fixedDuplicates) await saveStudents();
   }
-  try{
-    const sc = await storageAdapter.get(STORAGE_SCHEDULE);
-    state.schedule = sc ? JSON.parse(sc.value) : [];
-  }catch(e){ state.schedule = []; }
-  try{
-    const nt = await storageAdapter.get(STORAGE_NOTIFICATIONS);
-    state.notifications = nt ? JSON.parse(nt.value) : [];
-  }catch(e){ state.notifications = []; }
-  try{
-    const mz = await storageAdapter.get(STORAGE_MEMORIZATION);
-    state.memorization = mz ? JSON.parse(mz.value) : [];
-  }catch(e){ state.memorization = []; }
-  try{
-    const ib = await storageAdapter.get(STORAGE_IMPORT_BATCHES);
-    state.importBatches = ib ? JSON.parse(ib.value) : [];
-  }catch(e){ state.importBatches = []; }
-  try{
-    const cs = await storageAdapter.get(STORAGE_CENTER_SETTINGS);
-    state.centerSettings = cs ? JSON.parse(cs.value) : {};
-  }catch(e){ state.centerSettings = {}; }
+  try{ state.schedule = sc ? JSON.parse(sc.value) : []; }catch(e){ state.schedule = []; }
+  try{ state.notifications = nt ? JSON.parse(nt.value) : []; }catch(e){ state.notifications = []; }
+  try{ state.memorization = mz ? JSON.parse(mz.value) : []; }catch(e){ state.memorization = []; }
+  try{ state.importBatches = ib ? JSON.parse(ib.value) : []; }catch(e){ state.importBatches = []; }
+  try{ state.centerSettings = cs ? JSON.parse(cs.value) : {}; }catch(e){ state.centerSettings = {}; }
 
   if (firebaseAuth && firestoreDb){
     await loadAccountsFromFirestore();
@@ -829,7 +850,16 @@ let accountsLoadFailed = false; // true if a Firestore accounts read errored (e.
 
 async function loadAccountsFromFirestore(){
   try{
-    const snap = await withTimeout(firestoreDb.collection('users').get(), 5000);
+    // Same fast path as storageAdapter.get: try the on-device cache
+    // first (near-instant even with zero connectivity), and only wait
+    // on a real server round-trip if that comes up empty.
+    let snap;
+    try{
+      snap = await withTimeout(firestoreDb.collection('users').get({ source: 'cache' }), 3000);
+      if(snap.empty) throw new Error('empty-cache');
+    }catch(e){
+      snap = await withTimeout(firestoreDb.collection('users').get(), 5000);
+    }
     state.accounts = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
     accountsLoadFailed = false;
     try{ localStorage.setItem('cached_accounts', JSON.stringify(state.accounts)); }catch(e){}
