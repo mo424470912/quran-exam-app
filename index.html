@@ -2261,7 +2261,7 @@ function historyView(){
     <div class="stat-card"><div class="num">${uniqueStudents}</div><div class="lbl">عدد الطلاب المختبَرين</div></div>
   </div>
   <div class="history-toolbar">
-    <button class="btn-report" id="btn-monthly-report">${iconReport()} تقرير شهري</button>
+    <button class="btn-report" id="btn-monthly-report">${iconReport()} تقرير شهري (PDF)</button>
     <button class="btn-report" id="btn-daily-png">${iconShare()} نتائج اليوم PNG</button>
     <button class="btn-report" id="btn-daily-pdf">${iconShare()} نتائج اليوم PDF</button>
     <button class="btn-report" id="btn-batch-certs">${iconReport()} شهادات الشهر (PDF)</button>
@@ -3321,7 +3321,19 @@ function drawScoreChart(canvas, examsAsc){
 }
 
 /* ---------------- PERIOD REPORT (شهري / سنوي) ---------------- */
-async function drawMonthlyReport(period, monthStr){
+/* Builds the monthly/yearly report as a set of canvas PAGES instead of
+   one giant image. A single tall canvas (one row per student, no cap)
+   used to blow past the browser's max canvas size on devices with many
+   students, which is what showed up as a "pixelated"/garbled report —
+   the browser silently clips or downscales a canvas that's too large.
+   Paginating keeps every page a safe, fixed size no matter how many
+   students pass that month; generateMonthlyReport below stitches the
+   pages into one crisp multi-page PDF (a PDF also isn't recompressed
+   by chat apps the way a shared PNG is, which was making it blurrier
+   on top of the size issue). */
+const MONTHLY_REPORT_ROWS_PER_PAGE = 20;
+
+async function drawMonthlyReportPages(period, monthStr){
   period = period || 'month';
   await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
   await loadLogoImage();
@@ -3374,67 +3386,14 @@ async function drawMonthlyReport(period, monthStr){
     }))
     .sort((a,b)=> b.count - a.count);
 
-  // Show every passing student individually — no cutoff. (Previously
-  // capped at 14 rows sorted by exam count, which silently dropped
-  // students with fewer exams into a "و X آخرين" summary even though
-  // they passed — e.g. a student with one 92 would vanish behind
-  // students who simply tested more times. The canvas height below
-  // already scales to the row count, so there's no layout reason to cap it.)
-  const shownRows = rows;
-  const extra = rows.length - shownRows.length;
   const passingExams = periodExams.filter(e=> !e.stoppedEarly && e.score >= 80);
   const avgAll = passingExams.length ? Math.round(passingExams.reduce((s,e)=>s+e.score,0)/passingExams.length) : 0;
 
   const W = 1500;
   const rowH = 58;
-  const tableTop = 615;
-  const H = tableTop + 60 + shownRows.length*rowH + (extra>0?36:0) + 190;
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
-  drawHeader(ctx, W, H, 225);
-
-  ctx.direction = 'rtl'; ctx.textAlign = 'center';
-  ctx.fillStyle = PAL.green;
-  ctx.font = "700 46px 'Amiri', serif";
-  ctx.fillText(period==='year' ? 'التقرير السنوي' : 'التقرير الشهري', W/2, 335);
-  drawFlourish(ctx, W/2-180, 325, 14, PAL.gold);
-  drawFlourish(ctx, W/2+180, 325, 14, PAL.gold);
-
-  drawPillBadge(ctx, W/2, 385, periodLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
-
-  // Stat cards
-  const cardW = 380, cardH = 108, gap = 30, cardY = 435;
+  const cardW = 380, cardH = 108, gap = 30;
   const totalW = cardW*3 + gap*2;
   const startX = (W-totalW)/2;
-  const cardsData = [
-    { val: avgAll, lbl: 'متوسط الدرجات', icon:'star' },
-    { val: rows.length, lbl: 'عدد الطلاب', icon:'people' },
-    { val: periodExams.length, lbl: 'إجمالي الاختبارات', icon:'clip' },
-  ];
-  cardsData.forEach((c,i)=>{
-    const x = startX + i*(cardW+gap);
-    ctx.beginPath();
-    ctx.moveTo(x+14,cardY); ctx.lineTo(x+cardW-14,cardY);
-    ctx.arcTo(x+cardW,cardY,x+cardW,cardY+14,14);
-    ctx.lineTo(x+cardW,cardY+cardH-14); ctx.arcTo(x+cardW,cardY+cardH,x+cardW-14,cardY+cardH,14);
-    ctx.lineTo(x+14,cardY+cardH); ctx.arcTo(x,cardY+cardH,x,cardY+cardH-14,14);
-    ctx.lineTo(x,cardY+14); ctx.arcTo(x,cardY,x+14,cardY,14);
-    ctx.closePath();
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
-
-    drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
-    ctx.fillText(String(c.val), x+cardW/2-25, cardY+cardH/2+2);
-    ctx.fillStyle = PAL.inkSoft; ctx.font = "600 16px 'Tajawal'";
-    ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
-  });
-
-  // Table
   const tX = startX, tW = totalW;
   const colWidths = { name:0.27, teacher:0.24, date:0.19, count:0.15, avg:0.15 };
   const cols = [
@@ -3444,81 +3403,159 @@ async function drawMonthlyReport(period, monthStr){
     { key:'count', label:'عدد الاختبارات', w: tW*colWidths.count },
     { key:'avg', label:'متوسط الدرجة', w: tW*colWidths.avg },
   ];
-  // header row (rightmost column = اسم الطالب, matching RTL reading order)
-  let cx = tX + tW;
-  ctx.font = "700 19px 'Tajawal'";
-  cols.forEach(col=>{
-    const x0 = cx - col.w;
-    ctx.fillStyle = PAL.green; ctx.fillRect(x0, tableTop, col.w, 54);
-    ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(x0, tableTop, col.w, 54);
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-    ctx.fillText(col.label, x0+col.w/2, tableTop+34);
-    col._x0 = x0;
-    cx = x0;
-  });
+  // column x-offsets are the same on every page (rightmost = اسم الطالب,
+  // matching RTL reading order), so compute them once.
+  let cx0 = tX + tW;
+  cols.forEach(col=>{ const x0 = cx0 - col.w; col._x0 = x0; cx0 = x0; });
 
-  ctx.font = "500 18px 'Tajawal'";
-  shownRows.forEach((row,i)=>{
-    const y = tableTop + 54 + i*rowH;
-    ctx.fillStyle = i%2===0 ? '#FFFFFF' : '#FAF4E4';
+  function drawTableHeaderRow(ctx, y){
+    ctx.font = "700 19px 'Tajawal'";
+    cols.forEach(col=>{
+      ctx.fillStyle = PAL.green; ctx.fillRect(col._x0, y, col.w, 54);
+      ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(col._x0, y, col.w, 54);
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+      ctx.fillText(col.label, col._x0+col.w/2, y+34);
+    });
+  }
+  function drawDataRow(ctx, y, row, zebraIdx){
+    ctx.fillStyle = zebraIdx%2===0 ? '#FFFFFF' : '#FAF4E4';
     ctx.fillRect(tX, y, tW, rowH);
     const d = new Date(row.date);
     const dateStr = d.toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
-    const values = { name:row.name, teacher:row.teacherName, date:dateStr, count:String(row.count), avg: row.avg===null ? '—' : String(row.avg) };
+    const values = { name:row.name, teacher:row.teacherName, date:dateStr, count:String(row.count), avg:String(row.avg) };
+    ctx.font = "500 18px 'Tajawal'";
     ctx.fillStyle = PAL.ink;
     cols.forEach(col=>{
       ctx.textAlign = 'center';
       ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6);
     });
-  });
-  ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
-  ctx.strokeRect(tX, tableTop, tW, 54 + shownRows.length*rowH);
-
-  let afterTableY = tableTop + 54 + shownRows.length*rowH + 30;
-  if(extra>0){
-    ctx.fillStyle = PAL.inkSoft; ctx.font = "500 16px 'Tajawal'"; ctx.textAlign = 'center';
-    ctx.fillText(`و ${extra} طالب/ـة آخرين...`, W/2, afterTableY);
-    afterTableY += 34;
   }
 
-  // Dua plaque
-  const plaqueW = 620, plaqueH = 110, plaqueX = W/2-plaqueW/2, plaqueY = afterTableY+10;
-  ctx.beginPath();
-  ctx.moveTo(plaqueX+30, plaqueY);
-  ctx.lineTo(plaqueX+plaqueW-30, plaqueY);
-  ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY, plaqueX+plaqueW, plaqueY+plaqueH/2);
-  ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY+plaqueH, plaqueX+plaqueW-30, plaqueY+plaqueH);
-  ctx.lineTo(plaqueX+30, plaqueY+plaqueH);
-  ctx.quadraticCurveTo(plaqueX, plaqueY+plaqueH, plaqueX, plaqueY+plaqueH/2);
-  ctx.quadraticCurveTo(plaqueX, plaqueY, plaqueX+30, plaqueY);
-  ctx.closePath();
-  ctx.fillStyle = '#fff'; ctx.fill();
-  ctx.strokeStyle = PAL.gold; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = PAL.green; ctx.font = "600 21px 'Tajawal'"; ctx.textAlign = 'center';
-  ctx.fillText('نسأل الله أن يتقبل من الجميع', W/2, plaqueY+45);
-  ctx.fillText('وأن يجعل القرآن نوراً لهم في الدنيا والآخرة', W/2, plaqueY+78);
+  const pageChunks = [];
+  if(rows.length === 0){
+    pageChunks.push([]); // still produce one page so the header/stat-cards show
+  } else {
+    for(let i=0; i<rows.length; i+=MONTHLY_REPORT_ROWS_PER_PAGE){
+      pageChunks.push(rows.slice(i, i+MONTHLY_REPORT_ROWS_PER_PAGE));
+    }
+  }
+  const totalPages = pageChunks.length;
 
-  return { canvas, monthExams: periodExams };
+  const pages = pageChunks.map((chunk, pageIdx)=>{
+    const isFirst = pageIdx===0;
+    const isLast = pageIdx===totalPages-1;
+    const tableTop = isFirst ? 615 : 150;
+    const H = tableTop + 54 + chunk.length*rowH + (isLast ? 190 : 50);
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
+
+    if(isFirst){
+      drawHeader(ctx, W, H, 225);
+      ctx.direction = 'rtl'; ctx.textAlign = 'center';
+      ctx.fillStyle = PAL.green;
+      ctx.font = "700 46px 'Amiri', serif";
+      ctx.fillText(period==='year' ? 'التقرير السنوي' : 'التقرير الشهري', W/2, 335);
+      drawFlourish(ctx, W/2-180, 325, 14, PAL.gold);
+      drawFlourish(ctx, W/2+180, 325, 14, PAL.gold);
+      drawPillBadge(ctx, W/2, 385, periodLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
+
+      const cardY = 435;
+      const cardsData = [
+        { val: avgAll, lbl: 'متوسط الدرجات', icon:'star' },
+        { val: rows.length, lbl: 'عدد الطلاب', icon:'people' },
+        { val: periodExams.length, lbl: 'إجمالي الاختبارات', icon:'clip' },
+      ];
+      cardsData.forEach((c,i)=>{
+        const x = startX + i*(cardW+gap);
+        ctx.beginPath();
+        ctx.moveTo(x+14,cardY); ctx.lineTo(x+cardW-14,cardY);
+        ctx.arcTo(x+cardW,cardY,x+cardW,cardY+14,14);
+        ctx.lineTo(x+cardW,cardY+cardH-14); ctx.arcTo(x+cardW,cardY+cardH,x+cardW-14,cardY+cardH,14);
+        ctx.lineTo(x+14,cardY+cardH); ctx.arcTo(x,cardY+cardH,x,cardY+cardH-14,14);
+        ctx.lineTo(x,cardY+14); ctx.arcTo(x,cardY,x+14,cardY,14);
+        ctx.closePath();
+        ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
+
+        drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
+        ctx.fillText(String(c.val), x+cardW/2-25, cardY+cardH/2+2);
+        ctx.fillStyle = PAL.inkSoft; ctx.font = "600 16px 'Tajawal'";
+        ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
+      });
+    } else {
+      ctx.direction = 'rtl'; ctx.textAlign = 'center';
+      ctx.fillStyle = PAL.green;
+      ctx.font = "700 28px 'Amiri', serif";
+      ctx.fillText((period==='year' ? 'التقرير السنوي' : 'التقرير الشهري') + ' — تابع', W/2, 60);
+      ctx.fillStyle = PAL.inkSoft; ctx.font = "600 15px 'Tajawal'";
+      ctx.fillText(`صفحة ${pageIdx+1} من ${totalPages}`, W/2, 88);
+    }
+
+    drawTableHeaderRow(ctx, tableTop);
+    chunk.forEach((row,i)=> drawDataRow(ctx, tableTop+54+i*rowH, row, i));
+    ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(tX, tableTop, tW, 54 + chunk.length*rowH);
+
+    if(isLast){
+      const afterTableY = tableTop + 54 + chunk.length*rowH + 40;
+      const plaqueW = 620, plaqueH = 110, plaqueX = W/2-plaqueW/2, plaqueY = afterTableY;
+      ctx.beginPath();
+      ctx.moveTo(plaqueX+30, plaqueY);
+      ctx.lineTo(plaqueX+plaqueW-30, plaqueY);
+      ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY, plaqueX+plaqueW, plaqueY+plaqueH/2);
+      ctx.quadraticCurveTo(plaqueX+plaqueW, plaqueY+plaqueH, plaqueX+plaqueW-30, plaqueY+plaqueH);
+      ctx.lineTo(plaqueX+30, plaqueY+plaqueH);
+      ctx.quadraticCurveTo(plaqueX, plaqueY+plaqueH, plaqueX, plaqueY+plaqueH/2);
+      ctx.quadraticCurveTo(plaqueX, plaqueY, plaqueX+30, plaqueY);
+      ctx.closePath();
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.strokeStyle = PAL.gold; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = PAL.green; ctx.font = "600 21px 'Tajawal'"; ctx.textAlign = 'center';
+      ctx.fillText('نسأل الله أن يتقبل من الجميع', W/2, plaqueY+45);
+      ctx.fillText('وأن يجعل القرآن نوراً لهم في الدنيا والآخرة', W/2, plaqueY+78);
+    }
+
+    return canvas;
+  });
+
+  return { pages, monthExams: periodExams };
 }
 
 async function generateMonthlyReport(btnEl, period, monthStr){
   period = period || 'month';
   if(btnEl) btnEl.disabled = true;
   try{
-    const { canvas, monthExams } = await drawMonthlyReport(period, monthStr);
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      showToast('تعذّر تحميل مكتبة PDF — تأكد إنك متصل بالإنترنت أول مرة تستخدم هذا الزر');
+      return;
+    }
+    const { pages, monthExams } = await drawMonthlyReportPages(period, monthStr);
     if(monthExams.length === 0){
       showToast(period==='year' ? 'لا توجد اختبارات مسجّلة هالسنة بعد' : 'لا توجد اختبارات مسجّلة بهذا الشهر');
       return;
     }
-    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    const { jsPDF } = window.jspdf;
+    const first = pages[0];
+    const pdf = new jsPDF({ orientation: first.width>=first.height?'l':'p', unit:'pt', format:[first.width, first.height] });
+    pages.forEach((canvas, i)=>{
+      if(i>0) pdf.addPage([canvas.width, canvas.height], canvas.width>=canvas.height?'l':'p');
+      const imgData = canvas.toDataURL('image/png');
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    });
+
     const now = new Date();
     const [fnYear, fnMonth] = (period==='month' && monthStr && /^\d{4}-\d{1,2}$/.test(monthStr))
       ? monthStr.split('-').map(Number)
       : [now.getFullYear(), now.getMonth()+1];
     const fileName = period==='year'
-      ? `تقرير-سنوي-${now.getFullYear()}.png`
-      : `تقرير-شهري-${fnYear}-${fnMonth}.png`;
-    const file = new File([blob], fileName, { type:'image/png' });
+      ? `تقرير-سنوي-${now.getFullYear()}.pdf`
+      : `تقرير-شهري-${fnYear}-${fnMonth}.pdf`;
+    const blob = pdf.output('blob');
+    const file = new File([blob], fileName, { type:'application/pdf' });
     const title = period==='year' ? 'التقرير السنوي' : 'التقرير الشهري';
 
     if(navigator.canShare && navigator.canShare({ files:[file] })){
@@ -3529,7 +3566,7 @@ async function generateMonthlyReport(btnEl, period, monthStr){
       a.href = url; a.download = fileName;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      showToast(period==='year' ? 'تم حفظ التقرير السنوي كصورة' : 'تم حفظ التقرير الشهري كصورة');
+      showToast(period==='year' ? 'تم حفظ التقرير السنوي كملف PDF' : 'تم حفظ التقرير الشهري كملف PDF');
     }
   }catch(e){
     if(e && e.name !== 'AbortError'){
@@ -4012,8 +4049,8 @@ function statsView(){
     <label style="font-size:12.5px; color:var(--ink-soft); display:block; margin-bottom:6px;">اختر الشهر</label>
     <input type="month" id="stats-report-month" value="${currentYearMonth()}" style="width:100%; margin-bottom:10px;">
     <div class="history-toolbar">
-      <button class="btn-report" id="btn-monthly-report-stats">${iconReport()} تقرير الشهر المحدد</button>
-      <button class="btn-report" id="btn-yearly-report-stats">${iconReport()} تقرير سنوي (السنة الحالية)</button>
+      <button class="btn-report" id="btn-monthly-report-stats">${iconReport()} تقرير الشهر المحدد (PDF)</button>
+      <button class="btn-report" id="btn-yearly-report-stats">${iconReport()} تقرير سنوي (PDF)</button>
     </div>
   </div>
   `;
