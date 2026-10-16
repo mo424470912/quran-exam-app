@@ -3713,14 +3713,19 @@ async function drawMonthlyReportPages(period, monthStr){
     const [y,m] = monthStr.split('-').map(Number);
     targetYear = y; targetMonth = m - 1;
   }
-  const periodLabel = period==='year'
+  const isDay = period==='day';
+  const periodLabel = isDay
+    ? now.toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'})
+    : period==='year'
     ? now.toLocaleDateString('ar-EG', {year:'numeric'})
     : new Date(targetYear, targetMonth, 1).toLocaleDateString('ar-EG', {year:'numeric', month:'long'});
   const periodExams = visibleExams().filter(e=>{
+    if(isDay) return e.date.slice(0,10) === todayStamp();
     const d = new Date(e.date);
     if(period==='year') return d.getFullYear()===now.getFullYear();
     return d.getFullYear()===targetYear && d.getMonth()===targetMonth;
   });
+  if(isDay) periodExams.sort((a,b)=> new Date(a.date) - new Date(b.date));
 
   // Average scores should reflect actual passing performance, not get
   // dragged down by retakes/fails (score < 80 or stoppedEarly/"إعادة").
@@ -3743,7 +3748,10 @@ async function drawMonthlyReportPages(period, monthStr){
   // Students with no passing exam this period (every attempt was a
   // retry or under 80) are left out of the report entirely — only
   // students who actually passed at least once get listed.
-  const rows = Object.keys(byStudent)
+  const rows = isDay ? periodExams.map((e,i)=>({
+      rank:i+1, name:e.studentName, teacherName:e.teacherName, juz:(()=>{ const n=(String(e.juz).match(/\d+/g)||[]).map(Number); return n.length>1 ? `الأجزاء ${Math.min(...n)}–${Math.max(...n)}` : formatJuzRange(e.juz); })(),
+      score:e.score, failed: !!e.stoppedEarly || e.score<80, date:e.date,
+    })) : Object.keys(byStudent)
     .filter(name => byStudent[name].passCount > 0)
     .map(name => ({
       name, count: byStudent[name].count,
@@ -3755,7 +3763,11 @@ async function drawMonthlyReportPages(period, monthStr){
     .map((r,i)=>({ ...r, rank:i+1 }));
 
   const passingExams = periodExams.filter(e=> !e.stoppedEarly && e.score >= 80);
-  const avgAll = passingExams.length ? Math.round(passingExams.reduce((s,e)=>s+e.score,0)/passingExams.length) : 0;
+  const avgAll = isDay
+    ? (periodExams.length ? Math.round(periodExams.reduce((s,e)=>s+e.score,0)/periodExams.length) : 0)
+    : (passingExams.length ? Math.round(passingExams.reduce((s,e)=>s+e.score,0)/passingExams.length) : 0);
+  const dayPass = periodExams.filter(e=> !e.stoppedEarly && e.score>=80).length;
+  const dayFail = periodExams.length - dayPass;
 
   /* ---------- New report design (artwork header/footer + modern table) ---------- */
   const art = await loadReportArt();
@@ -3775,9 +3787,10 @@ async function drawMonthlyReportPages(period, monthStr){
   // split rows into pages: first page has the artwork header and fewer rows
   const pageChunks = [];
   if(rows.length === 0){ pageChunks.push([]); }
+  else if(isDay){ pageChunks.push(rows); }
   else { pageChunks.push(rows.slice(0, FIRST_CAP)); for(let i=FIRST_CAP; i<rows.length; i+=NEXT_CAP) pageChunks.push(rows.slice(i, i+NEXT_CAP)); }
   const totalPages = pageChunks.length;
-  const reportName = period==='year' ? 'التقرير السنوي' : 'التقرير الشهري';
+  const reportName = isDay ? 'نتائج اختبارات اليوم' : (period==='year' ? 'التقرير السنوي' : 'التقرير الشهري');
 
   function pill(ctx, cx, cy, w, h, c1, c2){
     const g = ctx.createLinearGradient(0, cy-h/2, 0, cy+h/2); g.addColorStop(0,c1); g.addColorStop(1,c2);
@@ -3870,6 +3883,60 @@ async function drawMonthlyReportPages(period, monthStr){
     ctx.fillStyle = color[1]; ctx.font = valFont || "900 44px 'Tajawal'"; ctx.fillText(String(value), tx+4, icy+2);
     ctx.font = "700 21px 'Tajawal'"; ctx.fillStyle = color[0]; ctx.fillText(label, tx+4, icy+36);
   }
+  // ---- daily-results table (one row per exam) ----
+  const relWD = [52,236,168,196,200,128];                 // # | name | teacher | juz | score | status (RTL order)
+  const relSumD = relWD.reduce((a,b)=>a+b,0);
+  const colsD = []; { let right = inX + inW; relWD.forEach(r=>{ const w = inW*r/relSumD; colsD.push({ x0:right-w, x1:right, w, cx:right-w/2 }); right -= w; }); }
+  const [dNum,dName,dTeacher,dJuz,dScore,dStatus] = colsD;
+  function drawDayHead(ctx, y){
+    const h = 66;
+    const g = ctx.createLinearGradient(0,y,0,y+h); g.addColorStop(0,'#136148'); g.addColorStop(1,'#08402F');
+    rrPath(ctx, inX, y, inW, h, 18); ctx.fillStyle = g; ctx.fill();
+    ctx.direction='rtl'; ctx.textAlign='center'; ctx.font = "700 21px 'Tajawal'";
+    [[dNum,'#',null],[dName,'اسم الطالب',null],[dTeacher,'المحفّظ',null],[dJuz,'الجزء','book'],[dScore,'العلامة','bars'],[dStatus,'النتيجة','medal']].forEach(([c,label,ic])=>{
+      ctx.fillStyle = '#fff';
+      if(ic){ const tw = ctx.measureText(label).width; ctx.fillText(label, c.cx - 14, y+h/2+8); glyph(ctx, ic, c.cx - 14 - tw/2 - 22, y+h/2, 22, RC.goldL); }
+      else ctx.fillText(label, c.cx, y+h/2+8);
+    });
+    return y+h;
+  }
+  function drawDayRow(ctx, y, row, i){
+    ctx.fillStyle = row.failed ? '#FBE9E6' : (i%2===0 ? '#FFFFFF' : RC.cream); ctx.fillRect(inX, y, inW, rowH);
+    ctx.strokeStyle = 'rgba(199,154,46,0.22)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(inX, y+rowH); ctx.lineTo(inX+inW, y+rowH); ctx.stroke();
+    const cy = y + rowH/2;
+    ctx.direction='rtl'; ctx.textAlign='center'; ctx.fillStyle = RC.ink;
+    ctx.font = "700 21px 'Tajawal'"; ctx.fillText(String(row.rank), dNum.cx, cy+8);
+    ctx.textAlign='right'; ctx.font = "800 23px 'Tajawal'"; ctx.fillStyle = row.failed ? '#9E2F22' : RC.ink;
+    let nm = row.name; while(ctx.measureText(nm).width > dName.w-30 && nm.length>4) nm = nm.slice(0,-2);
+    if(nm !== row.name) nm = nm.trim() + '…';
+    ctx.fillText(nm, dName.x1-16, cy+8);
+    ctx.textAlign='center'; ctx.font = "500 21px 'Tajawal'"; ctx.fillStyle = '#2E3B35';
+    let tn = row.teacherName || '—'; while(ctx.measureText(tn).width > dTeacher.w-14 && tn.length>4) tn = tn.slice(0,-2);
+    ctx.fillText(tn, dTeacher.cx, cy+8);
+    let jz = row.juz; while(ctx.measureText(jz).width > dJuz.w-14 && jz.length>4) jz = jz.slice(0,-2);
+    ctx.fillText(jz, dJuz.cx, cy+8);
+    // score number + progress bar
+    ctx.font = "800 22px 'Tajawal'"; ctx.fillStyle = row.failed ? '#9E2F22' : RC.ink; ctx.textAlign='right'; ctx.fillText(String(row.score), dScore.x1-18, cy+8);
+    const bx = dScore.x0+18, bw = dScore.w-18-18-52, bh = 14, by = cy-bh/2;
+    rrPath(ctx, bx, by, bw, bh, 7); ctx.fillStyle = '#E3DFD4'; ctx.fill();
+    const fw = Math.max(bh, bw*Math.max(0,Math.min(100,row.score))/100);
+    const excellent = !row.failed && row.score >= 90;
+    const c1 = row.failed ? '#A5382B' : (excellent?'#0A4634':'#B9831C'), c2 = row.failed ? '#E58B7B' : (excellent?'#1F7F5C':'#E9BE55');
+    const bg = ctx.createLinearGradient(bx,0,bx+bw,0); bg.addColorStop(0,c1); bg.addColorStop(1,c2);
+    rrPath(ctx, bx+bw-fw, by, fw, bh, 7); ctx.fillStyle = bg; ctx.fill();
+    // status pill
+    const label = row.failed ? 'إعادة' : gradeLabel(row.score);
+    const pw = label.length>6 ? 150 : 124;
+    if(row.failed) pill(ctx, dStatus.cx, cy, pw, 40, '#E27666', '#A5382B');
+    else pill(ctx, dStatus.cx, cy, pw, 40, excellent?'#14684C':'#EBC25C', excellent?'#08402F':'#B98419');
+    ctx.strokeStyle = excellent?'rgba(232,199,102,0.9)':'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5; rrPath(ctx, dStatus.cx-pw/2, cy-20, pw, 40, 20); ctx.stroke();
+    if(!row.failed){
+      const sg = ctx.createLinearGradient(0,cy-14,0,cy+14); sg.addColorStop(0,'#F0CF72'); sg.addColorStop(1,'#B98419');
+      ctx.beginPath(); ctx.arc(dStatus.cx-pw/2+22, cy, 14, 0, 7); ctx.fillStyle = excellent ? sg : 'rgba(255,255,255,0.35)'; ctx.fill();
+      starShape(ctx, dStatus.cx-pw/2+22, cy+0.5, 9, 4, '#fff');
+    }
+    ctx.fillStyle = '#fff'; ctx.textAlign='center'; ctx.font = "800 20px 'Tajawal'"; ctx.fillText(label, dStatus.cx + (row.failed?0:10), cy+7);
+  }
   function drawBody(ctx, H, frameTop){
     const bg = ctx.createLinearGradient(0,0,0,H); bg.addColorStop(0,'#FFFDF8'); bg.addColorStop(1,'#FBF3E0');
     ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
@@ -3921,7 +3988,12 @@ async function drawMonthlyReportPages(period, monthStr){
       });
       // stat cards (RTL: first card on the right)
       const cardY = 420, cardH = 122, gap = 22, cw = (W - 2*mX - 3*gap)/4;
-      const cards = [
+      const cards = isDay ? [
+        { color:['#7A4FB5','#4B2A86'], icon:'cal',    value: now.toLocaleDateString('ar-EG', {day:'numeric', month:'long'}), label:'تاريخ اليوم', f:"900 31px 'Tajawal'" },
+        { color:['#2C86C9','#0F4F86'], icon:'clip',   value: periodExams.length, label:'إجمالي الاختبارات' },
+        { color:['#2E8B63','#0A4634'], icon:'star',   value: dayPass, label:'ناجح' },
+        { color:['#D4604F','#9E2F22'], icon:'people', value: dayFail, label:'إعادة' },
+      ] : [
         { color:['#7A4FB5','#4B2A86'], icon:'cal',    value: periodLabel, label: period==='year'?'السنة المحددة':'الشهر المحدد', f:"900 31px 'Tajawal'" },
         { color:['#2C86C9','#0F4F86'], icon:'clip',   value: periodExams.length, label:'إجمالي الاختبارات' },
         { color:['#E0A93A','#A9701A'], icon:'people', value: rows.length, label:'عدد الطلاب' },
@@ -3931,25 +4003,30 @@ async function drawMonthlyReportPages(period, monthStr){
     }
 
     // section bar + table
-    const barBottom = sectionBar(ctx, barY, isFirst ? 'بيانات الطلاب' : `تابع ${reportName}`, isFirst ? 'people' : 'book');
+    const barBottom = sectionBar(ctx, barY, isFirst ? (isDay ? 'نتائج الطلاب' : 'بيانات الطلاب') : `تابع ${reportName}`, isFirst ? 'people' : 'book');
     const bodyTop = barBottom - 20;
     rrPath(ctx, mX, bodyTop, tW, tableBottom-bodyTop, 24); ctx.fillStyle = '#FFFFFF'; ctx.fill(); ctx.strokeStyle = RC.goldL; ctx.lineWidth = 2.5; ctx.stroke();
-    sectionBar(ctx, barY, isFirst ? 'بيانات الطلاب' : `تابع ${reportName}`, isFirst ? 'people' : 'book');
-    const headBottom = drawTableHead(ctx, barBottom + 14);
+    sectionBar(ctx, barY, isFirst ? (isDay ? 'نتائج الطلاب' : 'بيانات الطلاب') : `تابع ${reportName}`, isFirst ? 'people' : 'book');
+    const headBottom = (isDay ? drawDayHead : drawTableHead)(ctx, barBottom + 14);
     ctx.save(); rrPath(ctx, inX, headBottom, inW, tableBottom-headBottom-12, 14); ctx.clip();
     if(chunk.length===0){
       ctx.fillStyle='#fff'; ctx.fillRect(inX, headBottom, inW, rowH);
-      ctx.fillStyle = RC.soft; ctx.textAlign='center'; ctx.font="500 21px 'Tajawal'"; ctx.fillText('لا توجد اختبارات ناجحة في هذه الفترة', W/2, headBottom+rowH/2+8);
+      ctx.fillStyle = RC.soft; ctx.textAlign='center'; ctx.font="500 21px 'Tajawal'"; ctx.fillText(isDay ? 'ما في اختبارات مسجّلة اليوم' : 'لا توجد اختبارات ناجحة في هذه الفترة', W/2, headBottom+rowH/2+8);
     }
-    chunk.forEach((row,i)=> drawRow(ctx, headBottom + i*rowH, row, i));
+    chunk.forEach((row,i)=> (isDay ? drawDayRow : drawRow)(ctx, headBottom + i*rowH, row, i));
     ctx.restore();
 
     // footer text
     ctx.direction='rtl'; ctx.textAlign='center';
     const fTop = H - footerH;
     if(isLast){
+      if(isDay){
+        ctx.fillStyle = '#0B2F24'; ctx.font = "900 40px 'Tajawal'"; ctx.fillText(`متوسط علامات اليوم: ${avgAll}`, W/2+8, fTop+Math.round(117*S)-14);
+        ctx.fillStyle = '#9A6A1A'; ctx.font = "700 27px 'Tajawal'"; ctx.fillText('وفّقكم الله وبارك في حفظكم', W/2+8, fTop+Math.round(117*S)+30);
+      } else {
       ctx.fillStyle = '#0B2F24'; ctx.font = "700 42px 'Amiri', serif"; ctx.fillText('نَسأَلُ اللهَ أَنْ يَتَقَبَّلَ مِنَ الجَمِيعِ', W/2+8, fTop+Math.round(117*S)-14);
       ctx.fillStyle = '#9A6A1A'; ctx.font = "700 27px 'Tajawal'"; ctx.fillText('(وأن يجعل القرآن نوراً لهم في الدنيا والآخرة)', W/2+8, fTop+Math.round(117*S)+30);
+      }
     }
     if(totalPages>1){
       ctx.fillStyle = RC.soft; ctx.font = "700 22px 'Tajawal'";
@@ -4019,127 +4096,8 @@ async function generateMonthlyReport(btnEl, period, monthStr){
    so an examiner can send the day's results in one message right after
    finishing testing, without opening Excel. */
 async function drawDailyResultsImage(){
-  await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
-  await loadLogoImage();
-  const today = todayStamp();
-  const todayExams = visibleExams()
-    .filter(e => e.date.slice(0,10) === today)
-    .sort((a,b)=> new Date(a.date) - new Date(b.date));
-
-  const dateLabel = new Date().toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
-  const passCount = todayExams.filter(e => !e.stoppedEarly && e.score>=80).length;
-  const failCount = todayExams.length - passCount;
-  const avgAll = todayExams.length ? Math.round(todayExams.reduce((s,e)=>s+e.score,0)/todayExams.length) : 0;
-
-  const W = 1500;
-  const rowH = 58;
-  const tableTop = 615;
-  const maxRows = 20;
-  const shownRows = todayExams.slice(0, maxRows);
-  const extra = todayExams.length - shownRows.length;
-  const H = tableTop + 60 + Math.max(shownRows.length,1)*rowH + (extra>0?36:0) + 200;
-  const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = PAL.cream; ctx.fillRect(0,0,W,H);
-  drawHeader(ctx, W, H, 225);
-
-  ctx.direction = 'rtl'; ctx.textAlign = 'center';
-  ctx.fillStyle = PAL.green;
-  ctx.font = "700 46px 'Amiri', serif";
-  ctx.fillText('نتائج اختبارات اليوم', W/2, 335);
-  drawFlourish(ctx, W/2-220, 325, 14, PAL.gold);
-  drawFlourish(ctx, W/2+220, 325, 14, PAL.gold);
-
-  drawPillBadge(ctx, W/2, 385, dateLabel, "700 22px 'Tajawal'", 30, PAL.gold, '#fff', 46);
-
-  const cardW = 380, cardH = 108, gap = 30, cardY = 435;
-  const totalW = cardW*3 + gap*2;
-  const startX = (W-totalW)/2;
-  const cardsData = [
-    { val: todayExams.length, lbl: 'إجمالي الاختبارات', icon:'clip' },
-    { val: passCount, lbl: 'ناجح', icon:'star' },
-    { val: failCount, lbl: 'إعادة', icon:'people' },
-  ];
-  cardsData.forEach((c,i)=>{
-    const x = startX + i*(cardW+gap);
-    ctx.beginPath();
-    ctx.moveTo(x+14,cardY); ctx.lineTo(x+cardW-14,cardY);
-    ctx.arcTo(x+cardW,cardY,x+cardW,cardY+14,14);
-    ctx.lineTo(x+cardW,cardY+cardH-14); ctx.arcTo(x+cardW,cardY+cardH,x+cardW-14,cardY+cardH,14);
-    ctx.lineTo(x+14,cardY+cardH); ctx.arcTo(x,cardY+cardH,x,cardY+cardH-14,14);
-    ctx.lineTo(x,cardY+14); ctx.arcTo(x,cardY,x+14,cardY,14);
-    ctx.closePath();
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5; ctx.stroke();
-
-    drawIconCircle(ctx, x+cardW-58, cardY+cardH/2, 30, c.icon, PAL.green);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = PAL.green; ctx.font = "700 34px 'Amiri', serif";
-    ctx.fillText(String(c.val), x+cardW/2-25, cardY+cardH/2+2);
-    ctx.fillStyle = PAL.inkSoft; ctx.font = "600 16px 'Tajawal'";
-    ctx.fillText(c.lbl, x+cardW/2-25, cardY+cardH/2+30);
-  });
-
-  const tX = startX, tW = totalW;
-  const colWidths = { name:0.30, teacher:0.26, juz:0.24, score:0.20 };
-  const cols = [
-    { key:'name', label:'اسم الطالب', w: tW*colWidths.name },
-    { key:'teacher', label:'المحفّظ', w: tW*colWidths.teacher },
-    { key:'juz', label:'الجزء', w: tW*colWidths.juz },
-    { key:'score', label:'العلامة', w: tW*colWidths.score },
-  ];
-  let cx = tX + tW;
-  ctx.font = "700 19px 'Tajawal'";
-  cols.forEach(col=>{
-    const x0 = cx - col.w;
-    ctx.fillStyle = PAL.green; ctx.fillRect(x0, tableTop, col.w, 54);
-    ctx.strokeStyle = PAL.cream; ctx.lineWidth = 1; ctx.strokeRect(x0, tableTop, col.w, 54);
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-    ctx.fillText(col.label, x0+col.w/2, tableTop+34);
-    col._x0 = x0;
-    cx = x0;
-  });
-
-  ctx.font = "500 18px 'Tajawal'";
-  if(shownRows.length===0){
-    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(tX, tableTop+54, tW, rowH);
-    ctx.fillStyle = PAL.inkSoft; ctx.textAlign = 'center';
-    ctx.fillText('ما في اختبارات مسجّلة اليوم', tX+tW/2, tableTop+54+rowH/2+6);
-  }
-  shownRows.forEach((e,i)=>{
-    const y = tableTop + 54 + i*rowH;
-    const isFail = e.stoppedEarly || e.score < 80;
-    ctx.fillStyle = isFail ? '#FBE7E5' : (i%2===0 ? '#FFFFFF' : '#FAF4E4');
-    ctx.fillRect(tX, y, tW, rowH);
-    const scoreText = e.stoppedEarly ? 'إعادة' : String(e.score);
-    const values = { name:e.studentName, teacher:e.teacherName, juz:formatJuzRange(e.juz), score:scoreText };
-    ctx.fillStyle = isFail ? PAL.red : PAL.ink;
-    cols.forEach(col=>{
-      ctx.textAlign = 'center';
-      ctx.font = col.key==='score' ? "700 19px 'Tajawal'" : (col.key==='name' ? "700 19px 'Tajawal'" : "500 18px 'Tajawal'");
-      if(col.key==='score'){ drawScorePill(ctx, col._x0+col.w/2, y+rowH/2, scoreText, e.score, isFail); ctx.fillStyle = isFail ? PAL.red : PAL.ink; return; }
-      ctx.fillText(values[col.key], col._x0+col.w/2, y+rowH/2+6);
-    });
-    ctx.strokeStyle = 'rgba(192,138,40,0.22)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(tX, y+rowH); ctx.lineTo(tX+tW, y+rowH); ctx.stroke();
-  });
-  ctx.strokeStyle = '#E3D9C4'; ctx.lineWidth = 1.5;
-  ctx.strokeRect(tX, tableTop, tW, 54 + Math.max(shownRows.length,1)*rowH);
-
-  let afterTableY = tableTop + 54 + Math.max(shownRows.length,1)*rowH + 34;
-  if(extra>0){
-    ctx.fillStyle = '#EADFC2'; ctx.font = "500 17px 'Tajawal'"; ctx.textAlign = 'center';
-    ctx.fillText(`و ${extra} اختبار آخر...`, W/2, afterTableY);
-    afterTableY += 34;
-  }
-  drawPlaque(ctx, W/2, afterTableY + 6, 680, 112, [
-    { text:`متوسط علامات اليوم: ${avgAll}`, font:"700 24px 'Tajawal'" },
-    { text:'وفّقكم الله وبارك في حفظكم', font:"500 20px 'Tajawal'", color:PAL.inkSoft },
-  ]);
-
-  return { canvas, todayExams };
+  const { pages, monthExams } = await drawMonthlyReportPages('day');
+  return { canvas: pages[0], todayExams: monthExams };
 }
 
 async function exportDailyResults(btnEl){
