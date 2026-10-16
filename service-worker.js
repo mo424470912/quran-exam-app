@@ -6,7 +6,7 @@
 // worker only handles the *app shell* — the HTML/CSS/JS/fonts/icons —
 // so the page itself loads even with zero connectivity.
 
-const CACHE_NAME = 'quran-exam-app-v3';
+const CACHE_NAME = 'quran-exam-app-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -19,7 +19,7 @@ const APP_SHELL = [
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js',
   'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  'https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700;900&display=swap',
+  'https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;900&display=swap',
 ];
 
 self.addEventListener('install', (event) => {
