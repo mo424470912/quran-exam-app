@@ -642,6 +642,16 @@ html[data-theme="dark"] .brand-mark::before{ display:none; }
 .brand-mark img{ filter:drop-shadow(0 6px 14px rgba(27,67,50,0.22)); }
 html[data-theme="dark"] .brand-mark{ background:#F7F1E4; border-radius:26px; padding:12px 14px; box-shadow:var(--shadow-strong); }
 html[data-theme="dark"] .brand-mark img{ filter:none; }
+
+.record-top .name{ display:flex; align-items:center; gap:6px; }
+.name-edit-btn{ all:unset; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:8px; color:var(--ink-soft); opacity:.75; transition:background .15s,color .15s,opacity .15s; }
+.name-edit-btn svg{ width:15px; height:15px; }
+.name-edit-btn:hover,.name-edit-btn:focus-visible{ background:var(--gold-soft,rgba(192,138,40,.14)); color:var(--gold,#C08A28); opacity:1; }
+.name-edit{ flex:1; display:flex; flex-direction:column; gap:6px; margin-inline-end:8px; }
+.name-edit-input{ font-family:'Tajawal'; font-size:15px; font-weight:700; padding:7px 10px; border:1.5px solid var(--gold,#C08A28); border-radius:10px; background:var(--paper); color:var(--ink); width:100%; box-sizing:border-box; }
+.name-edit-all{ font-size:12px; display:flex; align-items:center; gap:5px; color:var(--ink-soft); }
+.name-edit-btns{ display:flex; gap:6px; }
+.name-edit-btns button{ font-size:12px; padding:4px 12px; }
 </style>
 </head>
 <body>
@@ -2539,6 +2549,7 @@ let historySearch = '';
 let historyFilters = { score: 'all', juz: '', dateFrom: '', dateTo: '' };
 let historyVisibleCount = 20;
 let editingTeacherRecordId = null; // exam.id currently showing the "edit teacher" inline form (admin/examiner only)
+let editingNameRecordId = null; // exam.id showing the inline student-name editor (admin/examiner only)
 let editingScoreRecordId = null; // exam.id currently showing the "edit score" inline form (admin/examiner only)
 const HISTORY_PAGE_SIZE = 20;
 
@@ -2623,6 +2634,7 @@ function renderRecords(list, totalCount){
   }
   const canEditTeacher = state.currentRole !== 'teacher';
   const canEditScore = state.currentRole !== 'teacher';
+  const canEditName = state.currentRole !== 'teacher';
   const cards = list.map(r=>{
     const isRetry = !!r.stoppedEarly;
     const scoreClass = isRetry ? 'score-low' : (r.score>=90 ? 'score-high' : r.score>=80 ? 'score-mid' : 'score-low');
@@ -2631,10 +2643,20 @@ function renderRecords(list, totalCount){
     const dateStr = d.toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
     const isEditingTeacher = canEditTeacher && editingTeacherRecordId === r.id;
     const isEditingScore = canEditScore && editingScoreRecordId === r.id;
+    const isEditingName = canEditName && editingNameRecordId === r.id;
+    const sameNameCount = isEditingName ? state.exams.filter(e=>e.studentName.trim().toLowerCase()===r.studentName.trim().toLowerCase()).length : 0;
     return `
     <div class="record${alertClass}">
       <div class="record-top">
-        <div class="name">${escapeHtml(r.studentName)}</div>
+        ${isEditingName ? `
+        <div class="name-edit">
+          <input type="text" class="name-edit-input" data-id="${r.id}" value="${escapeHtml(r.studentName)}" autocomplete="off">
+          ${sameNameCount>1 ? `<label class="name-edit-all"><input type="checkbox" class="name-edit-allcb" data-id="${r.id}" checked> تطبيق على كل سجلات هذا الطالب (${sameNameCount})</label>` : ''}
+          <div class="name-edit-btns">
+            <button class="name-edit-save" data-id="${r.id}">حفظ</button>
+            <button class="name-edit-cancel">إلغاء</button>
+          </div>
+        </div>` : `<div class="name">${escapeHtml(r.studentName)}${canEditName ? `<button class="name-edit-btn" data-id="${r.id}" title="تعديل اسم الطالب" aria-label="تعديل اسم الطالب"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></button>` : ''}</div>`}
         ${isEditingScore ? `
         <div style="display:flex;align-items:center;gap:6px;">
           <input type="number" min="0" max="100" step="0.5" class="score-edit-input" data-id="${r.id}" value="${isRetry ? 0 : r.score}" style="width:64px;font-family:'Tajawal';font-size:13px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);">
@@ -2689,6 +2711,7 @@ function refreshHistoryList(){
   attachShareHandlers();
   attachTeacherEditHandlers();
   attachScoreEditHandlers();
+  attachNameEditHandlers();
   const loadMoreBtn = document.getElementById('btn-load-more');
   if(loadMoreBtn) loadMoreBtn.onclick = ()=>{
     historyVisibleCount += HISTORY_PAGE_SIZE;
@@ -2804,6 +2827,63 @@ function attachTeacherEditHandlers(){
         showToast('تم تحديث اسم المحفّظ');
       }
       editingTeacherRecordId = null;
+      refreshHistoryList();
+    };
+  });
+}
+
+// Lets admin/examiner fix a misspelled student name from the history
+// list: either on this record only, or on every record of that student
+// (exams, student file, schedule and memorization entries).
+function attachNameEditHandlers(){
+  document.querySelectorAll('.name-edit-btn').forEach(b=>{
+    b.onclick = ()=>{
+      editingNameRecordId = b.dataset.id;
+      refreshHistoryList();
+      const inp = document.querySelector('.name-edit-input');
+      if(inp){ inp.focus(); inp.select(); }
+    };
+  });
+  document.querySelectorAll('.name-edit-cancel').forEach(b=>{
+    b.onclick = ()=>{ editingNameRecordId = null; refreshHistoryList(); };
+  });
+  document.querySelectorAll('.name-edit-input').forEach(inp=>{
+    inp.onkeydown = ev=>{
+      if(ev.key==='Enter'){ const sb = document.querySelector(`.name-edit-save[data-id="${inp.dataset.id}"]`); if(sb) sb.click(); }
+      if(ev.key==='Escape'){ editingNameRecordId = null; refreshHistoryList(); }
+    };
+  });
+  document.querySelectorAll('.name-edit-save').forEach(b=>{
+    b.onclick = async ()=>{
+      const id = b.dataset.id;
+      const inp = document.querySelector(`.name-edit-input[data-id="${id}"]`);
+      const cb = document.querySelector(`.name-edit-allcb[data-id="${id}"]`);
+      const exam = state.exams.find(e=>e.id===id);
+      const newName = inp ? inp.value.replace(/\s+/g,' ').trim() : '';
+      if(!exam) { editingNameRecordId = null; refreshHistoryList(); return; }
+      if(!newName){ showToast('اكتب اسم الطالب'); return; }
+      const oldKey = exam.studentName.trim().toLowerCase();
+      const newKey = newName.toLowerCase();
+      if(oldKey === newKey && exam.studentName.trim() === newName){ editingNameRecordId = null; refreshHistoryList(); return; }
+      const all = !!(cb && cb.checked);
+      let changed = 0;
+      state.exams.forEach(e=>{
+        if(e.id===id || (all && e.studentName.trim().toLowerCase()===oldKey)){ e.studentName = newName; changed++; }
+      });
+      if(all){
+        const oldSt = state.students.find(x=>x.name.trim().toLowerCase()===oldKey);
+        const newSt = state.students.find(x=>x.name.trim().toLowerCase()===newKey && x!==oldSt);
+        if(oldSt && !newSt) oldSt.name = newName;
+        (state.schedule||[]).forEach(x=>{ if((x.studentName||'').trim().toLowerCase()===oldKey) x.studentName = newName; });
+        (state.memorization||[]).forEach(x=>{ if((x.studentName||'').trim().toLowerCase()===oldKey) x.studentName = newName; });
+        await saveSchedule(); await saveMemorization();
+      }
+      recomputeJuzProgressForStudent(oldKey);
+      recomputeJuzProgressForStudent(newKey);
+      await saveExams();
+      await saveStudents();
+      showToast(changed>1 ? `تم تعديل الاسم في ${changed} سجلات` : 'تم تعديل اسم الطالب');
+      editingNameRecordId = null;
       refreshHistoryList();
     };
   });
