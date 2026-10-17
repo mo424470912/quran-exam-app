@@ -2864,19 +2864,42 @@ function attachNameEditHandlers(){
       if(!newName){ showToast('اكتب اسم الطالب'); return; }
       const oldKey = exam.studentName.trim().toLowerCase();
       const newKey = newName.toLowerCase();
-      if(oldKey === newKey && exam.studentName.trim() === newName){ editingNameRecordId = null; refreshHistoryList(); return; }
+      const entryExists = state.students.some(x=>x.name.trim().toLowerCase()===newKey);
+      if(oldKey === newKey && exam.studentName.trim() === newName && entryExists){ editingNameRecordId = null; refreshHistoryList(); return; }
       const all = !!(cb && cb.checked);
       let changed = 0;
       state.exams.forEach(e=>{
-        if(e.id===id || (all && e.studentName.trim().toLowerCase()===oldKey)){ e.studentName = newName; changed++; }
+        if(e.id===id || (all && e.studentName.trim().toLowerCase()===oldKey)){
+          if(e.studentName !== newName){ e.studentName = newName; changed++; }
+        }
       });
-      if(all){
-        const oldSt = state.students.find(x=>x.name.trim().toLowerCase()===oldKey);
-        const newSt = state.students.find(x=>x.name.trim().toLowerCase()===newKey && x!==oldSt);
-        if(oldSt && !newSt) oldSt.name = newName;
+      // If the old name has no exams left, the student has effectively been
+      // renamed (not split), so everything attached to them moves too.
+      const examsLeft = state.exams.some(e=>e.studentName.trim().toLowerCase()===oldKey);
+      const moveAll = all || !examsLeft;
+      if(moveAll && oldKey !== newKey){
         (state.schedule||[]).forEach(x=>{ if((x.studentName||'').trim().toLowerCase()===oldKey) x.studentName = newName; });
         (state.memorization||[]).forEach(x=>{ if((x.studentName||'').trim().toLowerCase()===oldKey) x.studentName = newName; });
         await saveSchedule(); await saveMemorization();
+      }
+      // Keep the student file in step with the records, so the student
+      // stays under their teacher instead of falling into "غير محدد".
+      const oldSt = state.students.find(x=>x.name.trim().toLowerCase()===oldKey);
+      let newSt = state.students.find(x=>x.name.trim().toLowerCase()===newKey && x!==oldSt);
+      if(oldSt && oldKey !== newKey){
+        if(moveAll){
+          if(!newSt){ oldSt.name = newName; newSt = oldSt; }
+          else {
+            ['phone','notes','nationalId','birthDate','registeredByTeacher'].forEach(k=>{ if(!newSt[k] && oldSt[k]) newSt[k] = oldSt[k]; });
+            state.students = state.students.filter(x=>x!==oldSt);
+          }
+        } else if(!newSt){
+          newSt = { id: makeStudentId(), name: newName, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
+          if(oldSt.registeredByTeacher) newSt.registeredByTeacher = oldSt.registeredByTeacher;
+          state.students.push(newSt);
+        }
+      } else if(!oldSt && !newSt){
+        state.students.push({ id: makeStudentId(), name: newName, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() });
       }
       recomputeJuzProgressForStudent(oldKey);
       recomputeJuzProgressForStudent(newKey);
