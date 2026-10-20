@@ -663,6 +663,34 @@ html[data-theme="dark"] .brand-mark img{ filter:none; }
 .weekday-chip span{ display:inline-block; padding:7px 14px; border:1.5px solid var(--line); border-radius:999px; font-size:13px; font-weight:600; background:var(--paper); color:var(--ink-soft); transition:all .15s; }
 .weekday-chip input:checked + span{ background:var(--green); border-color:var(--green); color:#fff; }
 .weekday-chip input:focus-visible + span{ outline:2px solid var(--gold,#C08A28); outline-offset:2px; }
+
+.settings-acc > summary{ list-style:none; cursor:pointer; display:flex; align-items:center; gap:10px; }
+.settings-acc > summary::-webkit-details-marker{ display:none; }
+.settings-acc > summary h3{ margin:0; flex:1; }
+.settings-acc .acc-meta{ font-size:12px; color:var(--ink-soft); background:var(--gold-soft,rgba(192,138,40,.14)); padding:2px 10px; border-radius:999px; }
+.settings-acc > summary::after{ content:''; width:8px; height:8px; border-right:2px solid var(--ink-soft); border-bottom:2px solid var(--ink-soft); transform:rotate(45deg); transition:transform .2s; margin-inline-start:4px; }
+.settings-acc[open] > summary::after{ transform:rotate(-135deg); }
+.settings-acc[open] > summary{ margin-bottom:12px; }
+
+.backup-banner{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:12px 14px; margin-bottom:14px; border:1.5px solid var(--gold,#C08A28); border-radius:14px; background:var(--gold-soft,rgba(192,138,40,.12)); }
+.backup-banner .bb-text{ display:flex; flex-direction:column; gap:2px; font-size:12.5px; color:var(--ink); }
+.backup-banner .bb-text b{ font-size:13.5px; }
+.backup-banner .bb-btns{ display:flex; gap:6px; }
+.backup-banner .bb-btns button{ font-size:12px; padding:6px 12px; width:auto; }
+.trash-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 0; border-bottom:1px dashed var(--line); }
+.trash-row:last-of-type{ border-bottom:none; }
+.trash-info{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.trash-info b{ font-size:13.5px; }
+.trash-info span{ font-size:11px; color:var(--ink-soft); }
+.trash-btns{ display:flex; gap:6px; flex-shrink:0; }
+.trash-btns button{ font-size:12px; padding:4px 10px; }
+.dup-pair{ border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:10px; background:var(--paper); }
+.dup-reason{ font-size:11px; color:var(--amber,#C08A28); font-weight:700; margin-bottom:6px; }
+.dup-names{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+.dup-names div{ display:flex; flex-direction:column; gap:2px; font-size:13.5px; }
+.dup-names span{ font-size:11px; color:var(--ink-soft); }
+.dup-actions{ display:flex; flex-wrap:wrap; gap:6px; }
+.dup-actions button{ font-size:12px; padding:6px 10px; width:auto; }
 </style>
 </head>
 <body>
@@ -681,6 +709,7 @@ const STORAGE_SCHEDULE = 'schedule';
 const STORAGE_NOTIFICATIONS = 'notifications';
 const STORAGE_MEMORIZATION = 'memorization';
 const STORAGE_IMPORT_BATCHES = 'importBatches';
+const STORAGE_TRASH = 'trash';
 const STORAGE_CENTER_SETTINGS = 'centerSettings';
 
 /* Dark mode: applied immediately (before first render) so there's no
@@ -1024,6 +1053,7 @@ let state = {
   schedule: [], // upcoming exam appointments: {id, studentName, teacherName, date, note, done}
   notifications: [], // {id, message, teacherName (null = all teachers), from, createdAt, readBy: [usernames]}
   memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo, quality, note, date, recordedBy}
+  trash: [], // {id, type:'exam'|'student'|'exams-bulk', data, label, deletedAt, deletedBy} — kept 30 days
   importBatches: [], // {id, source:'students-excel', date, importedBy, teacherName, entries:[{studentId, wasNew, prevSnapshot|null}]}
   centerSettings: null, // {name, fullName, tagline, directorName, logoDataUri} — null until loaded; getCenterSettings() below fills in defaults
   authMode: 'login', // login | register
@@ -1060,7 +1090,7 @@ async function loadAppData(){
   // to a multi-minute wait before the app could show anything. Fetched
   // in parallel, the whole batch takes only as long as the single
   // slowest one.
-  const [ex, st, sc, nt, mz, ib, cs] = await Promise.all([
+  const [ex, st, sc, nt, mz, ib, cs, tr] = await Promise.all([
     storageAdapter.get(STORAGE_EXAMS).catch(()=>null),
     storageAdapter.get(STORAGE_STUDENTS).catch(()=>null),
     storageAdapter.get(STORAGE_SCHEDULE).catch(()=>null),
@@ -1068,6 +1098,7 @@ async function loadAppData(){
     storageAdapter.get(STORAGE_MEMORIZATION).catch(()=>null),
     storageAdapter.get(STORAGE_IMPORT_BATCHES).catch(()=>null),
     storageAdapter.get(STORAGE_CENTER_SETTINGS).catch(()=>null),
+    storageAdapter.get(STORAGE_TRASH).catch(()=>null),
   ]);
   try{ state.exams = ex ? JSON.parse(ex.value) : []; }catch(e){ state.exams = []; }
   try{ state.students = st ? JSON.parse(st.value) : []; }catch(e){ state.students = []; }
@@ -1095,6 +1126,9 @@ async function loadAppData(){
   try{ state.importBatches = ib ? JSON.parse(ib.value) : []; }catch(e){ state.importBatches = []; }
   try{ state.centerSettings = cs ? JSON.parse(cs.value) : {}; }catch(e){ state.centerSettings = {}; }
   applyCenterOverrides();
+  try{ state.trash = tr ? JSON.parse(tr.value) : []; }catch(e){ state.trash = []; }
+  if(!Array.isArray(state.trash)) state.trash = [];
+  purgeOldTrash();
 
   if (firebaseAuth && firestoreDb){
     await loadAccountsFromFirestore();
@@ -1218,9 +1252,13 @@ function downloadBlob(content, filename, mime){
 }
 
 function exportDataJSON(){
-  const payload = { exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization };
-  downloadBlob(JSON.stringify(payload, null, 2), `بيانات-${todayStamp()}.json`, 'application/json');
-  showToast('تم تصدير البيانات (JSON)');
+  const payload = { app: 'quran-exam-center', version: 2, exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization, trash: state.trash || [], centerSettings: state.centerSettings || {} };
+  downloadBlob(JSON.stringify(payload, null, 2), `نسخة-احتياطية-${todayStamp()}.json`, 'application/json');
+  if(state.currentRole==='admin'){
+    state.centerSettings = { ...(state.centerSettings||{}), lastBackupExportAt: new Date().toISOString() };
+    saveCenterSettings().then(()=>render()).catch(()=>{});
+  }
+  showToast('تم تنزيل النسخة الاحتياطية');
 }
 
 async function exportDataExcel(){
@@ -1364,6 +1402,32 @@ async function exportDataExcel(){
   }
 }
 
+async function restoreFullFromFile(file){
+  try{
+    const data = JSON.parse(await file.text());
+    if(!data || !Array.isArray(data.exams) || !Array.isArray(data.students)){
+      showToast('ملف غير صالح — لازم يكون ملف نسخة احتياطية من نفس البرنامج'); return;
+    }
+    const when = data.exportedAt ? new Date(data.exportedAt).toLocaleDateString('ar-EG',{year:'numeric',month:'long',day:'numeric'}) : 'غير معروف';
+    const msg = `استعادة كاملة من نسخة بتاريخ ${when}:\n- ${data.exams.length} اختبار، ${data.students.length} طالب\n\nالبيانات الحالية (${state.exams.length} اختبار، ${state.students.length} طالب) رح تنستبدل بالكامل.\nقبل الاستبدال بيتحفظ نسخة من الوضع الحالي بقسم "نسخ احتياطية يدوية" على هذا الجهاز.\n\nمتابعة؟`;
+    if(!confirm(msg)) return;
+    createManualBackup('قبل الاستعادة الكاملة ' + todayStamp());
+    state.exams = data.exams;
+    state.students = data.students;
+    state.schedule = Array.isArray(data.schedule) ? data.schedule : [];
+    state.memorization = Array.isArray(data.memorization) ? data.memorization : [];
+    if(Array.isArray(data.trash)) state.trash = data.trash;
+    if(data.centerSettings && typeof data.centerSettings==='object') state.centerSettings = data.centerSettings;
+    purgeOldTrash(); applyCenterOverrides();
+    await saveExams(); await saveStudents(); await saveSchedule(); await saveMemorization(); await saveTrash(); await saveCenterSettings();
+    showToast('تمت الاستعادة الكاملة');
+    render();
+  }catch(e){
+    console.error(e);
+    showToast('تعذّر قراءة الملف — تأكد إنه ملف JSON صحيح من نفس البرنامج');
+  }
+}
+
 async function importDataFromFile(file){
   try{
     const text = await file.text();
@@ -1417,6 +1481,212 @@ async function importDataFromFile(file){
     console.error(e);
     showToast('تعذّر قراءة الملف — تأكد إنه ملف JSON صحيح من نفس البرنامج');
   }
+}
+
+/* ---------------- TRASH (سلة المحذوفات) ----------------
+   Deleting an exam record, a student file, or "all records" moves it
+   here for 30 days instead of erasing it, so a mistaken delete can be
+   undone from Settings. */
+const settingsAccOpen = { teachers:false, booking:false, trash:false, dups:false };
+const TRASH_DAYS = 30;
+function purgeOldTrash(){
+  const cut = Date.now() - TRASH_DAYS*86400000;
+  state.trash = (state.trash||[]).filter(t => new Date(t.deletedAt).getTime() >= cut);
+}
+async function saveTrash(){
+  await storageAdapter.set(STORAGE_TRASH, JSON.stringify(state.trash || []));
+}
+async function moveToTrash(type, data, label){
+  state.trash = state.trash || [];
+  state.trash.unshift({
+    id: 'tr_' + Date.now() + Math.random().toString(36).slice(2,6),
+    type, data, label: label || '', deletedAt: new Date().toISOString(), deletedBy: state.currentUser || '',
+  });
+  purgeOldTrash();
+  await saveTrash();
+}
+function ensureStudentEntry(name){
+  const key = name.trim().toLowerCase();
+  let st = state.students.find(x=>x.name.trim().toLowerCase()===key);
+  if(!st){
+    st = { id: makeStudentId(), name: name.trim(), phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
+    state.students.push(st);
+  }
+  return st;
+}
+async function restoreFromTrash(id){
+  const t = (state.trash||[]).find(x=>x.id===id);
+  if(!t) return false;
+  if(t.type==='exam'){
+    if(!state.exams.some(e=>e.id===t.data.id)) state.exams.push(t.data);
+    ensureStudentEntry(t.data.studentName);
+    recomputeJuzProgressForStudent(t.data.studentName.trim().toLowerCase());
+  } else if(t.type==='exams-bulk'){
+    const names = {};
+    (t.data||[]).forEach(e=>{
+      if(!state.exams.some(x=>x.id===e.id)){ state.exams.push(e); names[e.studentName.trim().toLowerCase()] = e.studentName; }
+    });
+    Object.keys(names).forEach(k=>{ ensureStudentEntry(names[k]); recomputeJuzProgressForStudent(k); });
+  } else if(t.type==='student'){
+    const k = t.data.name.trim().toLowerCase();
+    if(!state.students.some(x=>x.name.trim().toLowerCase()===k)) state.students.push(t.data);
+    recomputeJuzProgressForStudent(k);
+  }
+  state.exams.sort((a,b)=> new Date(b.date) - new Date(a.date));
+  state.trash = state.trash.filter(x=>x.id!==id);
+  await saveExams(); await saveStudents(); await saveTrash();
+  return true;
+}
+
+/* ---------------- DUPLICATE STUDENTS (دمج الطلاب المكررين) ---------------- */
+function normArName(n){
+  return String(n||'')
+    .replace(/[ً-ٰٟـ]/g,'')
+    .replace(/[أإآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/ؤ/g,'و').replace(/ئ/g,'ي')
+    .replace(/\s+/g,' ').trim().toLowerCase();
+}
+function editDistance(a,b){
+  if(a===b) return 0;
+  if(Math.abs(a.length-b.length)>2) return 3;
+  const dp = Array.from({length:a.length+1},(_,i)=>[i]);
+  for(let j=1;j<=b.length;j++) dp[0][j]=j;
+  for(let i=1;i<=a.length;i++) for(let j=1;j<=b.length;j++){
+    dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+  }
+  return dp[a.length][b.length];
+}
+function getIgnoredDupPairs(){
+  try{ return new Set(JSON.parse(localStorage.getItem('dup_ignored')||'[]')); }catch(e){ return new Set(); }
+}
+function ignoreDupPair(a,b){
+  try{
+    const set = getIgnoredDupPairs(); set.add([a,b].sort().join('|'));
+    localStorage.setItem('dup_ignored', JSON.stringify([...set]));
+  }catch(e){}
+}
+function examCountFor(student){
+  const k = student.name.trim().toLowerCase();
+  return state.exams.filter(e=>e.studentName.trim().toLowerCase()===k).length;
+}
+function findDuplicateCandidates(){
+  const ignored = getIgnoredDupPairs();
+  const items = state.students.map(s=>{
+    const norm = normArName(s.name);
+    return { s, norm, flat: norm.replace(/ /g,''), tokens: new Set(norm.split(' ').filter(Boolean)) };
+  });
+  const out = [];
+  for(let i=0;i<items.length;i++){
+    for(let j=i+1;j<items.length;j++){
+      const a = items[i], b = items[j];
+      if(ignored.has([a.s.id,b.s.id].sort().join('|'))) continue;
+      let reason = null;
+      if(a.flat === b.flat) reason = 'نفس الاسم تقريباً';
+      else {
+        const [small, big] = a.tokens.size <= b.tokens.size ? [a,b] : [b,a];
+        if(small.tokens.size>=2 && [...small.tokens].every(t=>big.tokens.has(t))) reason = 'اسم ناقص من الآخر';
+        else if(a.flat.length>=8 && b.flat.length>=8 && editDistance(a.flat,b.flat)<=2) reason = 'فرق إملائي بسيط';
+      }
+      if(reason) out.push({ a:a.s, b:b.s, reason });
+      if(out.length>=40) return out;
+    }
+  }
+  return out;
+}
+async function mergeStudents(keepId, removeId){
+  const keep = state.students.find(x=>x.id===keepId);
+  const rem = state.students.find(x=>x.id===removeId);
+  if(!keep || !rem || keep===rem) return null;
+  const remKey = rem.name.trim().toLowerCase();
+  let movedExams = 0;
+  state.exams.forEach(e=>{ if(e.studentName.trim().toLowerCase()===remKey){ e.studentName = keep.name; movedExams++; } });
+  (state.schedule||[]).forEach(x=>{ if((x.studentName||'').trim().toLowerCase()===remKey) x.studentName = keep.name; });
+  (state.memorization||[]).forEach(x=>{ if((x.studentName||'').trim().toLowerCase()===remKey) x.studentName = keep.name; });
+  ['phone','notes','nationalId','birthDate','registeredByTeacher','planJuzPerMonth','planGoalDate'].forEach(k=>{
+    if(!keep[k] && rem[k]) keep[k] = rem[k];
+  });
+  const union = [...new Set([...(keep.juzProgress||[]), ...(rem.juzProgress||[])])];
+  state.students = state.students.filter(x=>x!==rem);
+  await moveToTrash('student', rem, `${rem.name} (دُمج في ${keep.name})`);
+  keep.juzProgress = union.sort((a,b)=>a-b);
+  await saveExams(); await saveStudents(); await saveSchedule(); await saveMemorization();
+  return { movedExams };
+}
+function mergeSummaryText(keep, rem){
+  return `دمج "${rem.name}" في "${keep.name}"؟\n\n- ${examCountFor(rem)} اختبار بينتقلوا لاسم "${keep.name}"\n- بيانات "${keep.name}" هي اللي بتبقى (ورقم الهاتف والملاحظات بتنضاف إذا ناقصة)\n- ملف "${rem.name}" بينتقل لسلة المحذوفات ${TRASH_DAYS} يوم`;
+}
+function dupSectionHTML(){
+  if(state.currentRole==='teacher') return '';
+  const pairs = findDuplicateCandidates();
+  if(!pairs.length) return '';
+  return `
+  <details class="settings-block settings-acc" data-acc="dups" ${settingsAccOpen.dups?'open':''}>
+    <summary><h3>طلاب مكررون محتملون</h3><span class="acc-meta">${pairs.length}</span></summary>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">أسماء متشابهة ممكن تكون لنفس الطالب. اختر الاسم الصحيح اللي بدك تبقيه.</p>
+    ${pairs.map(pr=>`
+    <div class="dup-pair">
+      <div class="dup-reason">${pr.reason}</div>
+      <div class="dup-names">
+        <div><b>${escapeHtml(pr.a.name)}</b><span>${examCountFor(pr.a)} اختبار</span></div>
+        <div><b>${escapeHtml(pr.b.name)}</b><span>${examCountFor(pr.b)} اختبار</span></div>
+      </div>
+      <div class="dup-actions">
+        <button class="btn btn-primary dup-merge" data-keep="${pr.a.id}" data-rem="${pr.b.id}">أبقِ "${escapeHtml(pr.a.name)}"</button>
+        <button class="btn btn-primary dup-merge" data-keep="${pr.b.id}" data-rem="${pr.a.id}">أبقِ "${escapeHtml(pr.b.name)}"</button>
+        <button class="ghost dup-ignore" data-a="${pr.a.id}" data-b="${pr.b.id}">ليسوا نفس الطالب</button>
+      </div>
+    </div>`).join('')}
+  </details>`;
+}
+function attachDupHandlers(){
+  document.querySelectorAll('.dup-merge').forEach(b=>{
+    b.onclick = async ()=>{
+      const keep = state.students.find(x=>x.id===b.dataset.keep), rem = state.students.find(x=>x.id===b.dataset.rem);
+      if(!keep || !rem) return;
+      if(!confirm(mergeSummaryText(keep, rem))) return;
+      const r = await mergeStudents(keep.id, rem.id);
+      if(r){ showToast(`تم الدمج، انتقل ${r.movedExams} اختبار`); render(); }
+    };
+  });
+  document.querySelectorAll('.dup-ignore').forEach(b=>{
+    b.onclick = ()=>{ ignoreDupPair(b.dataset.a, b.dataset.b); render(); };
+  });
+}
+
+/* Backup reminder for the admin: a banner on the home screen once the
+   last downloaded backup is a week old (or there never was one). */
+const BACKUP_REMIND_DAYS = 7;
+function lastBackupDays(){
+  const at = state.centerSettings && state.centerSettings.lastBackupExportAt;
+  return at ? Math.floor((Date.now() - new Date(at).getTime())/86400000) : null;
+}
+function backupReminderHTML(){
+  if(state.currentRole!=='admin') return '';
+  if(!state.exams.length && !state.students.length) return '';
+  const days = lastBackupDays();
+  if(days!==null && days < BACKUP_REMIND_DAYS) return '';
+  try{ const snooze = localStorage.getItem('backup_snooze_until'); if(snooze && Date.now() < +snooze) return ''; }catch(e){}
+  return `
+  <div class="backup-banner">
+    <div class="bb-text"><b>نسخة احتياطية</b><span>${days===null ? 'ما نزّلت نسخة احتياطية من البيانات لسا.' : `مرّ ${days} يوم على آخر نسخة احتياطية.`}</span></div>
+    <div class="bb-btns">
+      <button class="btn btn-primary" id="btn-backup-now">تحميل نسخة الآن</button>
+      <button class="ghost" id="btn-backup-snooze">لاحقاً</button>
+    </div>
+  </div>`;
+}
+function attachBackupBannerHandlers(){
+  const now = document.getElementById('btn-backup-now');
+  if(now) now.onclick = ()=> exportDataJSON();
+  const sn = document.getElementById('btn-backup-snooze');
+  if(sn) sn.onclick = ()=>{
+    try{ localStorage.setItem('backup_snooze_until', String(Date.now()+2*86400000)); }catch(e){}
+    render();
+  };
+}
+function bindAccToggles(){
+  document.querySelectorAll('.settings-acc').forEach(d=>{
+    d.addEventListener('toggle', ()=>{ settingsAccOpen[d.dataset.acc] = d.open; });
+  });
 }
 
 /* Once-per-day local snapshot (kept even if the shared database is
@@ -2045,6 +2315,7 @@ function mainScreen(){
     <button class="logout" id="btn-logout">خروج</button>
   </div>
   <div class="content" id="content">
+    ${currentView==='dashboard' ? backupReminderHTML() : ''}
     ${viewFn()}
   </div>
   <div class="tabbar">
@@ -2080,6 +2351,7 @@ async function doLogout(){
 }
 
 function attachMainHandlers(){
+  attachBackupBannerHandlers();
   document.getElementById('btn-logout').onclick = ()=>{
     if(state.view==='test' && testForm.stage==='scoring'){
       showToast('لازم تحفظ أو ترجع عن الاختبار الحالي قبل الخروج');
@@ -2800,9 +3072,13 @@ function attachHistoryHandlers(){
 function attachDeleteHandlers(){
   document.querySelectorAll('.record-del').forEach(b=>{
     b.onclick = async ()=>{
-      if(!confirm('هل تريد حذف هذا السجل؟')) return;
+      if(!confirm('هل تريد حذف هذا السجل؟\nبينتقل لسلة المحذوفات وبتقدر تسترجعه خلال 30 يوم.')) return;
+      const ex = state.exams.find(e=>e.id===b.dataset.id);
+      if(ex) await moveToTrash('exam', ex, `${ex.studentName} · ${ex.juz} · ${ex.score}`);
       state.exams = state.exams.filter(e=>e.id!==b.dataset.id);
-      await saveExams();
+      if(ex) recomputeJuzProgressForStudent(ex.studentName.trim().toLowerCase());
+      await saveExams(); await saveStudents();
+      showToast('نُقل السجل لسلة المحذوفات');
       render();
     };
   });
@@ -4690,6 +4966,7 @@ function studentListView(){
   return `
   ${scheduleSection()}
   <div class="section-title">الطلاب</div>
+  ${dupSectionHTML()}
   <div class="search-box">
     <input type="text" id="student-search-input" placeholder="ابحث عن طالب..." value="${escapeHtml(studentSearch)}">
   </div>
@@ -5519,6 +5796,8 @@ function attachStudentListHandlers(){
   attachStudentCardHandlers();
   attachTeacherGroupToggleHandlers();
   attachScheduleHandlers();
+  attachDupHandlers();
+  bindAccToggles();
 }
 
 function attachTeacherGroupToggleHandlers(){
@@ -5694,6 +5973,17 @@ function studentDetailView(){
   <div class="section-title" style="margin-top:22px;">سجل اختبارات ${escapeHtml(student.name)}</div>
   ${exams.length===0 ? `<div class="empty-state">ما في اختبارات مسجّلة لهاد الطالب بعد</div>` : renderRecords(exams)}
 
+  ${state.currentRole!=='teacher' ? `
+  <details class="settings-block settings-acc" data-acc="mergehere" style="margin-top:18px;">
+    <summary><h3>دمج طالب مكرر في هذا الملف</h3></summary>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">إذا نفس الطالب مسجّل باسم تاني، اختار الاسم الثاني وبتنتقل كل اختباراته لهاد الملف.</p>
+    <div class="field" style="display:flex; gap:8px;">
+      <input type="text" id="merge-input" list="merge-datalist" placeholder="ابدأ بكتابة الاسم المكرر" style="flex:1;" autocomplete="off">
+      <button class="btn btn-primary" id="btn-merge-here" style="white-space:nowrap;">دمج</button>
+    </div>
+    <datalist id="merge-datalist">${state.students.filter(x=>x.id!==student.id).map(x=>`<option value="${escapeHtml(x.name)}"></option>`).join('')}</datalist>
+  </details>` : ''}
+
   <button class="delete-student-btn" id="btn-delete-student">حذف ملف الطالب</button>
   `;
 }
@@ -5744,13 +6034,27 @@ function attachStudentDetailHandlers(){
     render();
   };
 
+  bindAccToggles();
+  const mergeHere = document.getElementById('btn-merge-here');
+  if(mergeHere) mergeHere.onclick = async ()=>{
+    const keep = state.students.find(x=>x.id===selectedStudentId);
+    const name = document.getElementById('merge-input').value.trim().toLowerCase();
+    const rem = state.students.find(x=>x.id!==selectedStudentId && x.name.trim().toLowerCase()===name);
+    if(!keep || !rem){ showToast('اختر الاسم من القائمة المقترحة'); return; }
+    if(!confirm(mergeSummaryText(keep, rem))) return;
+    const r = await mergeStudents(keep.id, rem.id);
+    if(r){ showToast(`تم الدمج، انتقل ${r.movedExams} اختبار`); render(); }
+  };
+
   const delBtn = document.getElementById('btn-delete-student');
   if(delBtn) delBtn.onclick = async ()=>{
-    if(!confirm('حذف ملف الطالب؟ (سجلات اختباراته السابقة رح تضل موجودة بالسجل)')) return;
+    if(!confirm('حذف ملف الطالب؟ (سجلات اختباراته السابقة رح تضل موجودة بالسجل، وبيتنقل الملف لسلة المحذوفات 30 يوم)')) return;
+    const delSt = state.students.find(s => s.id===selectedStudentId);
+    if(delSt) await moveToTrash('student', delSt, delSt.name);
     state.students = state.students.filter(s => s.id!==selectedStudentId);
     await saveStudents();
     selectedStudentId = null;
-    showToast('تم حذف ملف الطالب');
+    showToast('نُقل ملف الطالب لسلة المحذوفات');
     render();
   };
 
@@ -5783,6 +6087,7 @@ function attachStudentDetailHandlers(){
 /* ---------------- SETTINGS VIEW ---------------- */
 const roleLabel = { admin: 'مدير', examiner: 'مختبِر', teacher: 'محفّظ' };
 let centerSettingsExpanded = false;
+
 
 function settingsView(){
   const isAdmin = state.currentRole === 'admin';
@@ -5853,8 +6158,8 @@ function settingsView(){
   ` : ''}
 
   ${isAdmin ? `
-  <div class="settings-block">
-    <h3>المحفّظون</h3>
+  <details class="settings-block settings-acc" data-acc="teachers" ${settingsAccOpen.teachers?'open':''}>
+    <summary><h3>المحفّظون</h3><span class="acc-meta">${TEACHERS.length}</span></summary>
     <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">القائمة اللي بتظهر عند الاختبار والحجز وتسجيل الطلاب وربط الحسابات. تغيير اسم محفّظ بيتحدّث تلقائياً بكل سجلاته وطلابه وحساباته المرتبطة.</p>
     <div class="teacher-manage-list">
       ${TEACHERS.map((n,i)=>`
@@ -5868,10 +6173,10 @@ function settingsView(){
       <input type="text" id="tm-new-name" placeholder="اسم المحفّظ الجديد" style="flex:1;">
       <button class="btn btn-primary" id="btn-tm-add" style="white-space:nowrap;">إضافة</button>
     </div>
-  </div>
+  </details>
 
-  <div class="settings-block">
-    <h3>مواعيد الحجز</h3>
+  <details class="settings-block settings-acc" data-acc="booking" ${settingsAccOpen.booking?'open':''}>
+    <summary><h3>مواعيد الحجز</h3><span class="acc-meta">${escapeHtml(bookingDaysText())} · ${BOOKING_MAX_PER_DAY}</span></summary>
     <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">الأيام اللي بيقدر المحفّظ يحجز فيها اختبار لطلابه، وأقصى عدد طلاب باليوم.</p>
     <div class="weekday-chips">
       ${WEEKDAY_NAMES_AR.map((nm,d)=>`<label class="weekday-chip"><input type="checkbox" class="bk-day" value="${d}" ${BOOKING_ALLOWED_WEEKDAYS.includes(d)?'checked':''}><span>${nm}</span></label>`).join('')}
@@ -5882,7 +6187,7 @@ function settingsView(){
     </div>
     <div id="bk-error" style="font-size:12px; color:var(--red); margin-bottom:8px;"></div>
     <button class="btn btn-primary" id="btn-save-booking">حفظ إعدادات الحجز</button>
-  </div>
+  </details>
   ` : ''}
 
   ${(isAdmin || state.currentRole==='examiner') ? `
@@ -6027,6 +6332,13 @@ function settingsView(){
     </div>
     <input type="file" id="import-file-input" accept="application/json" style="display:none;">
     <p style="font-size:11.5px; color:var(--ink-soft); margin-top:2px;">الاستيراد بيدمج البيانات (ما بيمسح شي موجود) — مفيد لنقل بيانات من جهاز أو مركز تاني.</p>
+    ${isAdmin ? `
+    <div class="data-btn-row" style="margin-top:10px;">
+      <button class="ghost" id="btn-restore-full-trigger">استعادة كاملة من نسخة احتياطية</button>
+    </div>
+    <input type="file" id="restore-full-input" accept="application/json" style="display:none;">
+    <p style="font-size:11.5px; color:var(--ink-soft); margin-top:2px;">الاستعادة الكاملة بتستبدل كل البيانات الحالية بمحتوى الملف (بيتحفظ نسخة من الوضع الحالي قبلها).</p>
+    <p style="font-size:11.5px; color:var(--ink-soft); margin-top:6px;">آخر نسخة احتياطية تم تنزيلها: <b>${lastBackupDays()===null ? 'لسا ما انعملت' : (lastBackupDays()===0 ? 'اليوم' : `قبل ${lastBackupDays()} يوم`)}</b></p>` : ''}
   </div>
 
   <div class="settings-block">
@@ -6059,6 +6371,26 @@ function settingsView(){
         </div>`).join('')
     }
   </div>
+
+  ${state.currentRole!=='teacher' ? `
+  <details class="settings-block settings-acc" data-acc="trash" ${settingsAccOpen.trash?'open':''}>
+    <summary><h3>سلة المحذوفات</h3><span class="acc-meta">${(state.trash||[]).length}</span></summary>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">أي سجل أو ملف طالب بتحذفه بيضل هون ${TRASH_DAYS} يوم، وبتقدر تسترجعه.</p>
+    ${(state.trash||[]).length===0 ? `<p style="font-size:12px; color:var(--ink-soft);">السلة فاضية.</p>` : (state.trash||[]).map(t=>{
+      const left = Math.max(0, TRASH_DAYS - Math.floor((Date.now()-new Date(t.deletedAt).getTime())/86400000));
+      const typeLabel = t.type==='exam' ? 'سجل اختبار' : t.type==='student' ? 'ملف طالب' : 'كل السجلات';
+      const d = new Date(t.deletedAt).toLocaleDateString('ar-EG',{month:'short',day:'numeric'});
+      return `<div class="trash-row">
+        <div class="trash-info"><b>${escapeHtml(t.label||'—')}</b><span>${typeLabel} · حُذف ${d}${t.deletedBy?` بواسطة ${escapeHtml(t.deletedBy)}`:''} · باقي ${left} يوم</span></div>
+        <div class="trash-btns">
+          <button class="trash-restore" data-id="${t.id}">استرجاع</button>
+          <button class="ghost trash-purge" data-id="${t.id}">حذف نهائي</button>
+        </div>
+      </div>`;
+    }).join('')}
+    ${(state.trash||[]).length ? `<button class="btn btn-danger" id="btn-empty-trash" style="margin-top:10px;">تفريغ السلة</button>` : ''}
+  </details>
+  ` : ''}
 
   <div class="settings-block">
     <h3>البيانات</h3>
@@ -6140,6 +6472,8 @@ function attachSettingsHandlers(){
     centerSettingsExpanded = false;
     render();
   };
+
+  bindAccToggles();
 
   /* ----- Admin: manage teachers list ----- */
   async function persistTeachers(list){
@@ -6497,12 +6831,42 @@ function attachSettingsHandlers(){
     render();
   };
 
+  const restoreFullTrigger = document.getElementById('btn-restore-full-trigger');
+  const restoreFullInput = document.getElementById('restore-full-input');
+  if(restoreFullTrigger && restoreFullInput){
+    restoreFullTrigger.onclick = ()=> restoreFullInput.click();
+    restoreFullInput.onchange = ()=>{
+      if(restoreFullInput.files && restoreFullInput.files[0]) restoreFullFromFile(restoreFullInput.files[0]);
+      restoreFullInput.value = '';
+    };
+  }
+  document.querySelectorAll('.trash-restore').forEach(b=>{
+    b.onclick = async ()=>{
+      const ok = await restoreFromTrash(b.dataset.id);
+      showToast(ok ? 'تم الاسترجاع' : 'تعذّر الاسترجاع');
+      render();
+    };
+  });
+  document.querySelectorAll('.trash-purge').forEach(b=>{
+    b.onclick = async ()=>{
+      if(!confirm('حذف نهائي؟ ما في رجعة بعدها.')) return;
+      state.trash = state.trash.filter(x=>x.id!==b.dataset.id);
+      await saveTrash(); render();
+    };
+  });
+  const emptyTrash = document.getElementById('btn-empty-trash');
+  if(emptyTrash) emptyTrash.onclick = async ()=>{
+    if(!confirm('تفريغ السلة نهائياً؟ ما في رجعة بعدها.')) return;
+    state.trash = []; await saveTrash(); render();
+  };
+
   const clearBtn = document.getElementById('btn-clear-data');
   if(clearBtn) clearBtn.onclick = async ()=>{
-    if(!confirm('سيتم حذف جميع سجلات الاختبارات نهائياً. هل أنت متأكد؟')) return;
+    if(!confirm('سيتم حذف جميع سجلات الاختبارات.\nبتنتقل لسلة المحذوفات وبتقدر تسترجعها خلال 30 يوم. هل أنت متأكد؟')) return;
+    if(state.exams.length) await moveToTrash('exams-bulk', state.exams.slice(), `كل سجلات الاختبارات (${state.exams.length})`);
     state.exams = [];
     await saveExams();
-    showToast('تم حذف جميع السجلات');
+    showToast('تم نقل جميع السجلات لسلة المحذوفات');
     render();
   };
 
@@ -6523,6 +6887,7 @@ function attachSettingsHandlers(){
     state.notifications = [];
     state.memorization = [];
     state.importBatches = [];
+    state.trash = [];
     await saveExams();
     await saveStudents();
     await saveSchedule();
