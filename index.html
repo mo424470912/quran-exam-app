@@ -699,6 +699,9 @@ html[data-theme="dark"] .brand-mark img{ filter:none; }
 .app-credit img{ height:44px; width:auto; display:block; }
 html[data-theme="dark"] .app-credit{ color:#f2ede0; }
 html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
+.field input.plain-input{ padding:11px 14px; }
+#btn-tm-add,#btn-danger-unlock,#btn-merge-here{ width:auto; flex:none; padding-left:20px; padding-right:20px; }
+.field input.plain-input{ min-width:0; }
 </style>
 </head>
 <body>
@@ -5993,7 +5996,7 @@ function studentDetailView(){
     <summary><h3>دمج طالب مكرر في هذا الملف</h3></summary>
     <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">إذا نفس الطالب مسجّل باسم تاني، اختار الاسم الثاني وبتنتقل كل اختباراته لهاد الملف.</p>
     <div class="field" style="display:flex; gap:8px;">
-      <input type="text" id="merge-input" list="merge-datalist" placeholder="ابدأ بكتابة الاسم المكرر" style="flex:1;" autocomplete="off">
+      <input class="plain-input" type="text" id="merge-input" list="merge-datalist" placeholder="ابدأ بكتابة الاسم المكرر" style="flex:1;" autocomplete="off">
       <button class="btn btn-primary" id="btn-merge-here" style="white-space:nowrap;">دمج</button>
     </div>
     <datalist id="merge-datalist">${state.students.filter(x=>x.id!==student.id).map(x=>`<option value="${escapeHtml(x.name)}"></option>`).join('')}</datalist>
@@ -6185,7 +6188,7 @@ function settingsView(){
       </div>`).join('')}
     </div>
     <div class="field" style="display:flex; gap:8px; margin-top:10px;">
-      <input type="text" id="tm-new-name" placeholder="اسم المحفّظ الجديد" style="flex:1;">
+      <input class="plain-input" type="text" id="tm-new-name" placeholder="اسم المحفّظ الجديد" style="flex:1;">
       <button class="btn btn-primary" id="btn-tm-add" style="white-space:nowrap;">إضافة</button>
     </div>
   </details>
@@ -6198,7 +6201,7 @@ function settingsView(){
     </div>
     <div class="field" style="margin-top:10px;">
       <label>أقصى عدد طلاب باليوم</label>
-      <input type="number" id="bk-max" min="1" max="200" value="${BOOKING_MAX_PER_DAY}">
+      <input class="plain-input" type="number" id="bk-max" min="1" max="200" value="${BOOKING_MAX_PER_DAY}">
     </div>
     <div id="bk-error" style="font-size:12px; color:var(--red); margin-bottom:8px;"></div>
     <button class="btn btn-primary" id="btn-save-booking">حفظ إعدادات الحجز</button>
@@ -6414,7 +6417,7 @@ function settingsView(){
          <p style="font-size:11.5px; color:var(--ink-soft); margin-top:6px;">الخيار ظاهر لدقيقتين فقط ثم بيختفي من جديد.</p>`
       : (dangerPromptOpen
         ? `<div class="field" style="display:flex; gap:8px;">
-             <input type="password" id="danger-pass" placeholder="كلمة مرور حسابك" autocomplete="current-password" style="flex:1;">
+             <input class="plain-input" type="password" id="danger-pass" placeholder="كلمة مرور حسابك" autocomplete="current-password" style="flex:1;">
              <button class="btn btn-primary" id="btn-danger-unlock" style="white-space:nowrap;">فتح</button>
            </div>
            <div id="danger-error" style="font-size:12px; color:var(--red);"></div>`
