@@ -652,6 +652,17 @@ html[data-theme="dark"] .brand-mark img{ filter:none; }
 .name-edit-all{ font-size:12px; display:flex; align-items:center; gap:5px; color:var(--ink-soft); }
 .name-edit-btns{ display:flex; gap:6px; }
 .name-edit-btns button{ font-size:12px; padding:4px 12px; }
+
+.teacher-manage-list{ display:flex; flex-direction:column; gap:6px; }
+.teacher-manage-row{ display:flex; align-items:center; gap:6px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:var(--paper); }
+.teacher-manage-row .tm-name{ flex:1; font-weight:600; font-size:14px; }
+.teacher-manage-row button{ font-size:12px; padding:4px 10px; }
+.weekday-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+.weekday-chip{ cursor:pointer; }
+.weekday-chip input{ position:absolute; opacity:0; pointer-events:none; }
+.weekday-chip span{ display:inline-block; padding:7px 14px; border:1.5px solid var(--line); border-radius:999px; font-size:13px; font-weight:600; background:var(--paper); color:var(--ink-soft); transition:all .15s; }
+.weekday-chip input:checked + span{ background:var(--green); border-color:var(--green); color:#fff; }
+.weekday-chip input:focus-visible + span{ outline:2px solid var(--gold,#C08A28); outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -1083,6 +1094,7 @@ async function loadAppData(){
   try{ state.memorization = mz ? JSON.parse(mz.value) : []; }catch(e){ state.memorization = []; }
   try{ state.importBatches = ib ? JSON.parse(ib.value) : []; }catch(e){ state.importBatches = []; }
   try{ state.centerSettings = cs ? JSON.parse(cs.value) : {}; }catch(e){ state.centerSettings = {}; }
+  applyCenterOverrides();
 
   if (firebaseAuth && firestoreDb){
     await loadAccountsFromFirestore();
@@ -2169,7 +2181,25 @@ const CENTER_NAME_DEFAULT = 'مركز السيد هاشم';
 const CENTER_FULLNAME_DEFAULT = 'مركز السيد هاشم لتعليم وتحفيظ القرآن الكريم';
 const CENTER_TAGLINE_DEFAULT = 'لتعليم و تحفيظ القرآن الكريم';
 const BOOKING_ALLOWED_WEEKDAYS = [6, 1, 3]; // Saturday, Monday, Wednesday (JS getDay(): Sun=0..Sat=6)
-const BOOKING_MAX_PER_DAY = 10;
+let BOOKING_MAX_PER_DAY = 10;
+const WEEKDAY_NAMES_AR = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+// Admin-editable values (Settings) override these built-in defaults.
+const TEACHERS_DEFAULT = TEACHERS.slice();
+const BOOKING_WEEKDAYS_DEFAULT = BOOKING_ALLOWED_WEEKDAYS.slice();
+const BOOKING_MAX_DEFAULT = BOOKING_MAX_PER_DAY;
+function applyCenterOverrides(){
+  const cs = state.centerSettings || {};
+  const t = (Array.isArray(cs.teachers) && cs.teachers.length) ? cs.teachers : TEACHERS_DEFAULT;
+  TEACHERS.length = 0; t.forEach(n=>TEACHERS.push(n));
+  const w = (Array.isArray(cs.bookingWeekdays) && cs.bookingWeekdays.length) ? cs.bookingWeekdays : BOOKING_WEEKDAYS_DEFAULT;
+  BOOKING_ALLOWED_WEEKDAYS.length = 0; w.forEach(d=>BOOKING_ALLOWED_WEEKDAYS.push(d));
+  const m = parseInt(cs.bookingMaxPerDay, 10);
+  BOOKING_MAX_PER_DAY = m > 0 ? m : BOOKING_MAX_DEFAULT;
+}
+function bookingDaysText(){
+  const names = [...BOOKING_ALLOWED_WEEKDAYS].sort((a,b)=>a-b).map(d=>WEEKDAY_NAMES_AR[d]);
+  return names.length>1 ? names.slice(0,-1).join('، ') + ' و' + names[names.length-1] : (names[0]||'');
+}
 const BOOKING_FAIL_COOLDOWN_DAYS = 7;
 
 /* Center identity (name/logo/director) — customizable from Settings so
@@ -4754,7 +4784,7 @@ function scheduleSection(){
     </div>` : ''}
     <div class="field">
       <input type="date" id="sch-date">
-      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;">الحجز متاح أيام السبت والاثنين والأربعاء فقط، وبحد أقصى ${BOOKING_MAX_PER_DAY} طلاب باليوم الواحد.</div>
+      <div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;">الحجز متاح أيام ${bookingDaysText()} فقط، وبحد أقصى ${BOOKING_MAX_PER_DAY} طلاب باليوم الواحد.</div>
     </div>
     <div class="field"><input type="text" id="sch-note" placeholder="ملاحظة (اختياري)"></div>
     ${!isTeacherRole ? `
@@ -4872,7 +4902,7 @@ function attachScheduleHandlers(){
     const teacherName = state.currentRole==='teacher' ? (state.currentTeacherLink || '') : (teacherSel ? teacherSel.value : '');
     if(!studentName || !date){ showToast('الرجاء تعبئة اسم الطالب والتاريخ'); return; }
     if(!isAllowedBookingDay(date)){
-      const msg = 'الحجز متاح بس أيام السبت والاثنين والأربعاء — اختر تاريخ تاني.';
+      const msg = `الحجز متاح بس أيام ${bookingDaysText()} — اختر تاريخ تاني.`;
       if(errEl) errEl.textContent = msg; showToast(msg); return;
     }
     if(bookingDayCount(date) >= BOOKING_MAX_PER_DAY){
@@ -5822,6 +5852,39 @@ function settingsView(){
   </div>
   ` : ''}
 
+  ${isAdmin ? `
+  <div class="settings-block">
+    <h3>المحفّظون</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">القائمة اللي بتظهر عند الاختبار والحجز وتسجيل الطلاب وربط الحسابات. تغيير اسم محفّظ بيتحدّث تلقائياً بكل سجلاته وطلابه وحساباته المرتبطة.</p>
+    <div class="teacher-manage-list">
+      ${TEACHERS.map((n,i)=>`
+      <div class="teacher-manage-row">
+        <span class="tm-name">${escapeHtml(n)}</span>
+        <button class="ghost tm-rename" data-i="${i}" aria-label="تعديل الاسم">تعديل</button>
+        <button class="ghost tm-del" data-i="${i}" aria-label="حذف">حذف</button>
+      </div>`).join('')}
+    </div>
+    <div class="field" style="display:flex; gap:8px; margin-top:10px;">
+      <input type="text" id="tm-new-name" placeholder="اسم المحفّظ الجديد" style="flex:1;">
+      <button class="btn btn-primary" id="btn-tm-add" style="white-space:nowrap;">إضافة</button>
+    </div>
+  </div>
+
+  <div class="settings-block">
+    <h3>مواعيد الحجز</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">الأيام اللي بيقدر المحفّظ يحجز فيها اختبار لطلابه، وأقصى عدد طلاب باليوم.</p>
+    <div class="weekday-chips">
+      ${WEEKDAY_NAMES_AR.map((nm,d)=>`<label class="weekday-chip"><input type="checkbox" class="bk-day" value="${d}" ${BOOKING_ALLOWED_WEEKDAYS.includes(d)?'checked':''}><span>${nm}</span></label>`).join('')}
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label>أقصى عدد طلاب باليوم</label>
+      <input type="number" id="bk-max" min="1" max="200" value="${BOOKING_MAX_PER_DAY}">
+    </div>
+    <div id="bk-error" style="font-size:12px; color:var(--red); margin-bottom:8px;"></div>
+    <button class="btn btn-primary" id="btn-save-booking">حفظ إعدادات الحجز</button>
+  </div>
+  ` : ''}
+
   ${(isAdmin || state.currentRole==='examiner') ? `
   <div class="settings-block">
     <h3>توليد شهادات دفعة واحدة</h3>
@@ -6075,6 +6138,85 @@ function attachSettingsHandlers(){
     await saveCenterSettings();
     showToast('تم حفظ هوية المركز');
     centerSettingsExpanded = false;
+    render();
+  };
+
+  /* ----- Admin: manage teachers list ----- */
+  async function persistTeachers(list){
+    state.centerSettings = { ...(state.centerSettings || {}), teachers: list.slice() };
+    await saveCenterSettings();
+    applyCenterOverrides();
+  }
+  async function renameTeacherEverywhere(oldN, newN){
+    state.exams.forEach(e=>{ if(e.teacherName===oldN) e.teacherName = newN; });
+    state.students.forEach(x=>{ if(x.registeredByTeacher===oldN) x.registeredByTeacher = newN; });
+    (state.schedule||[]).forEach(x=>{ if(x.teacherName===oldN) x.teacherName = newN; });
+    (state.memorization||[]).forEach(x=>{ if(x.teacherName===oldN) x.teacherName = newN; });
+    (state.notifications||[]).forEach(x=>{ if(x.teacherName===oldN) x.teacherName = newN; });
+    await saveExams(); await saveStudents(); await saveSchedule(); await saveMemorization(); await saveNotifications();
+    const linked = state.accounts.filter(a=>a.teacherLink===oldN);
+    if(firebaseAuth){
+      for(const a of linked){
+        if(!a.uid) continue;
+        try{ await firestoreDb.collection('users').doc(a.uid).update({ teacherLink: newN }); }catch(e){}
+      }
+      try{ await loadAccountsFromFirestore(); }catch(e){}
+    } else if(linked.length){
+      linked.forEach(a=>{ a.teacherLink = newN; });
+      await saveAccounts();
+    }
+  }
+  const tmAdd = document.getElementById('btn-tm-add');
+  if(tmAdd) tmAdd.onclick = async ()=>{
+    const inp = document.getElementById('tm-new-name');
+    const n = inp.value.replace(/\s+/g,' ').trim();
+    if(!n){ showToast('اكتب اسم المحفّظ'); return; }
+    if(TEACHERS.some(x=>x.trim()===n)){ showToast('هاد المحفّظ موجود بالقائمة'); return; }
+    await persistTeachers([...TEACHERS, n]);
+    showToast('تمت إضافة المحفّظ');
+    render();
+  };
+  const tmNew = document.getElementById('tm-new-name');
+  if(tmNew) tmNew.onkeydown = ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); tmAdd.click(); } };
+  document.querySelectorAll('.tm-rename').forEach(b=>{
+    b.onclick = async ()=>{
+      const i = +b.dataset.i, oldN = TEACHERS[i];
+      const input = prompt('الاسم الجديد للمحفّظ:', oldN);
+      if(input === null) return;
+      const n = input.replace(/\s+/g,' ').trim();
+      if(!n || n === oldN) return;
+      if(TEACHERS.some((x,j)=>j!==i && x.trim()===n)){ showToast('هاد الاسم موجود بالقائمة'); return; }
+      const list = TEACHERS.slice(); list[i] = n;
+      await persistTeachers(list);
+      await renameTeacherEverywhere(oldN, n);
+      showToast('تم تعديل اسم المحفّظ في كل السجلات');
+      render();
+    };
+  });
+  document.querySelectorAll('.tm-del').forEach(b=>{
+    b.onclick = async ()=>{
+      const i = +b.dataset.i, n = TEACHERS[i];
+      if(TEACHERS.length <= 1){ showToast('لازم يبقى محفّظ واحد على الأقل'); return; }
+      if(!confirm(`حذف المحفّظ "${n}" من القائمة؟\nسجلاته وطلابه القدام بيضلوا محفوظين باسمه، بس ما رح يظهر بقوائم الاختيار.`)) return;
+      await persistTeachers(TEACHERS.filter((_,j)=>j!==i));
+      showToast('تم حذف المحفّظ من القائمة');
+      render();
+    };
+  });
+
+  /* ----- Admin: booking settings ----- */
+  const saveBk = document.getElementById('btn-save-booking');
+  if(saveBk) saveBk.onclick = async ()=>{
+    const days = [...document.querySelectorAll('.bk-day:checked')].map(c=>+c.value);
+    const max = parseInt(document.getElementById('bk-max').value, 10);
+    const err = document.getElementById('bk-error');
+    if(!days.length){ err.textContent = 'اختر يوماً واحداً على الأقل'; return; }
+    if(!(max >= 1)){ err.textContent = 'اكتب عدداً صحيحاً أكبر من صفر'; return; }
+    err.textContent = '';
+    state.centerSettings = { ...(state.centerSettings || {}), bookingWeekdays: days, bookingMaxPerDay: max };
+    await saveCenterSettings();
+    applyCenterOverrides();
+    showToast('تم حفظ إعدادات الحجز');
     render();
   };
 
