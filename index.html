@@ -2568,6 +2568,7 @@ function testSetupView(){
       <option value="" ${!testForm.teacherName?'selected':''} disabled>اختر المحفّظ</option>
       ${TEACHERS.map(n=>`<option value="${escapeHtml(n)}" ${testForm.teacherName===n?'selected':''}>${escapeHtml(n)}</option>`).join('')}
     </select>
+    <div id="teacher-auto-note" style="display:${testForm.teacherAuto && testForm.teacherName ? 'block' : 'none'};font-size:11.5px;color:var(--green);margin-top:5px;">✓ تم اختيار المحفّظ تلقائياً حسب سجل الطالب — بتقدر تغيّره.</div>
   </div>
   <div class="field">
     <label>الأجزاء المختبَر فيها</label>
@@ -2666,6 +2667,22 @@ function attachTestHandlers(){
   else attachTestSetupHandlers();
 }
 
+/* The student's known teacher: the teacher the student was registered
+   under, otherwise the teacher of their latest exam, otherwise the one
+   they're most associated with. Returns null if unknown or no longer
+   in the teachers list. */
+function knownTeacherForStudent(name){
+  const key = (name||'').trim().toLowerCase();
+  if(!key) return null;
+  const st = state.students.find(x=>x.name.trim().toLowerCase()===key);
+  const exams = state.exams
+    .filter(e=>e.studentName.trim().toLowerCase()===key && e.teacherName)
+    .sort((a,b)=> new Date(b.date)-new Date(a.date));
+  if(!st && !exams.length) return null;
+  const candidates = [st && st.registeredByTeacher, exams[0] && exams[0].teacherName, st && getStudentTeacherName(st)];
+  return candidates.find(t => t && TEACHERS.includes(t)) || null;
+}
+
 function attachTestSetupHandlers(){
   const resumeBtn = document.getElementById('btn-resume-draft');
   if(resumeBtn) resumeBtn.onclick = ()=>{
@@ -2685,6 +2702,17 @@ function attachTestSetupHandlers(){
   const nEl = document.getElementById('f-notes');
   sEl.oninput = ()=>{
     testForm.studentName = sEl.value;
+    const noteEl = document.getElementById('teacher-auto-note');
+    const known = knownTeacherForStudent(sEl.value);
+    if(known){
+      testForm.teacherName = known; testForm.teacherAuto = true;
+      if(tEl) tEl.value = known;
+      if(noteEl) noteEl.style.display = 'block';
+    } else if(testForm.teacherAuto){
+      testForm.teacherName = ''; testForm.teacherAuto = false;
+      if(tEl) tEl.selectedIndex = 0;
+      if(noteEl) noteEl.style.display = 'none';
+    }
     const panel = document.getElementById('student-history-panel');
     if(panel){
       const html = studentHistoryPanelHTML(testForm.studentName);
@@ -2692,7 +2720,7 @@ function attachTestSetupHandlers(){
       panel.style.display = html ? 'block' : 'none';
     }
   };
-  tEl.onchange = ()=> testForm.teacherName = tEl.value;
+  tEl.onchange = ()=>{ testForm.teacherName = tEl.value; testForm.teacherAuto = false; const n = document.getElementById('teacher-auto-note'); if(n) n.style.display = 'none'; };
   if(nEl) nEl.oninput = ()=> testForm.notes = nEl.value;
 
   document.querySelectorAll('.juz-mode-btn').forEach(b=>{
