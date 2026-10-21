@@ -702,6 +702,9 @@ html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
 .field input.plain-input{ padding:11px 14px; }
 #btn-tm-add,#btn-danger-unlock,#btn-merge-here{ width:auto; flex:none; padding-left:20px; padding-right:20px; }
 .field input.plain-input{ min-width:0; }
+.mz-preview{ padding:10px 14px; margin:0 0 14px; border:1.5px dashed var(--gold,#C08A28); border-radius:12px; background:var(--gold-soft,rgba(192,138,40,.12)); font-size:13px; color:var(--ink); }
+.mz-other-surah{ margin:0 0 12px; font-size:12.5px; }
+.mz-other-surah summary{ cursor:pointer; color:var(--green); font-weight:700; }
 </style>
 </head>
 <body>
@@ -1063,7 +1066,7 @@ let state = {
   students: [],
   schedule: [], // upcoming exam appointments: {id, studentName, teacherName, date, note, done}
   notifications: [], // {id, message, teacherName (null = all teachers), from, createdAt, readBy: [usernames]}
-  memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo, quality, note, date, recordedBy}
+  memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo (computed from surah/ayah), surah, ayahFrom, surahTo, ayahTo, quality, note, date, recordedBy}
   trash: [], // {id, type:'exam'|'student'|'exams-bulk', data, label, deletedAt, deletedBy} — kept 30 days
   importBatches: [], // {id, source:'students-excel', date, importedBy, teacherName, entries:[{studentId, wasNew, prevSnapshot|null}]}
   centerSettings: null, // {name, fullName, tagline, directorName, logoDataUri} — null until loaded; getCenterSettings() below fills in defaults
@@ -1803,6 +1806,26 @@ function upsertStudentFromExam(record){
 }
 
 const MUSHAF_TOTAL_PAGES = 604;
+/* Madina mushaf (Hafs, 604 pages) lookup — generated from quran-meta */
+const QURAN_SURAH_NAMES = ["الفاتحة","البقرة","آل عمران","النساء","المائدة","الأنعام","الأعراف","الأنفال","التوبة","يونس","هود","يوسف","الرعد","إبراهيم","الحجر","النحل","الإسراء","الكهف","مريم","طه","الأنبياء","الحج","المؤمنون","النور","الفرقان","الشعراء","النمل","القصص","العنكبوت","الروم","لقمان","السجدة","الأحزاب","سبإ","فاطر","يس","الصافات","ص","الزمر","غافر","فصلت","الشورى","الزخرف","الدخان","الجاثية","الأحقاف","محمد","الفتح","الحجرات","ق","الذاريات","الطور","النجم","القمر","الرحمن","الواقعة","الحديد","المجادلة","الحشر","الممتحنة","الصف","الجمعة","المنافقون","التغابن","الطلاق","التحريم","الملك","القلم","الحاقة","المعارج","نوح","الجن","المزمل","المدثر","القيامة","الإنسان","المرسلات","النبإ","النازعات","عبس","التكوير","الانفطار","المطففين","الانشقاق","البروج","الطارق","الأعلى","الغاشية","الفجر","البلد","الشمس","الليل","الضحى","الشرح","التين","العلق","القدر","البينة","الزلزلة","العاديات","القارعة","التكاثر","العصر","الهمزة","الفيل","قريش","الماعون","الكوثر","الكافرون","النصر","المسد","الإخلاص","الفلق","الناس"];
+const QURAN_SURAH_AYAH_COUNT = [7,286,200,176,120,165,206,75,129,109,123,111,43,52,99,128,111,110,98,135,112,78,118,64,77,227,93,88,69,60,34,30,73,54,45,83,182,88,75,85,54,53,89,59,37,35,38,29,18,45,60,49,62,55,78,96,29,22,24,13,14,11,11,18,12,12,30,52,52,44,28,28,20,56,40,31,50,40,46,42,29,19,36,25,22,17,19,26,30,20,15,21,11,8,8,19,5,8,8,11,11,8,3,9,5,4,7,3,6,3,5,4,5,6];
+const QURAN_SURAH_FIRST_ID = [1,8,294,494,670,790,955,1161,1236,1365,1474,1597,1708,1751,1803,1902,2030,2141,2251,2349,2484,2596,2674,2792,2856,2933,3160,3253,3341,3410,3470,3504,3534,3607,3661,3706,3789,3971,4059,4134,4219,4273,4326,4415,4474,4511,4546,4584,4613,4631,4676,4736,4785,4847,4902,4980,5076,5105,5127,5151,5164,5178,5189,5200,5218,5230,5242,5272,5324,5376,5420,5448,5476,5496,5552,5592,5623,5673,5713,5759,5801,5830,5849,5885,5910,5932,5949,5968,5994,6024,6044,6059,6080,6091,6099,6107,6126,6131,6139,6147,6158,6169,6177,6180,6189,6194,6198,6205,6208,6214,6217,6222,6226,6231];
+const QURAN_PAGE_FIRST_ID = [1,8,13,24,32,37,45,56,65,69,77,84,91,96,101,109,113,120,127,134,142,149,153,161,171,177,184,189,194,198,204,210,218,223,227,232,238,241,245,253,256,260,264,267,272,277,282,289,290,294,303,309,316,323,331,339,346,355,364,371,377,385,394,402,409,415,426,434,442,447,451,459,467,474,480,488,494,500,505,508,513,517,520,527,531,538,545,553,559,568,573,580,585,588,595,599,607,615,621,628,634,641,648,656,664,669,672,675,679,683,687,693,701,706,711,715,720,727,734,740,746,752,759,765,773,778,783,790,798,808,817,825,834,842,849,858,863,871,880,884,891,900,908,914,921,927,932,936,941,947,955,966,977,985,992,998,1006,1012,1022,1028,1036,1042,1050,1059,1075,1085,1092,1098,1104,1110,1114,1118,1125,1133,1142,1150,1161,1169,1177,1186,1194,1201,1206,1213,1222,1230,1236,1242,1249,1256,1262,1267,1272,1276,1283,1290,1297,1304,1308,1315,1322,1329,1335,1342,1347,1353,1358,1365,1371,1379,1385,1390,1398,1407,1418,1426,1435,1443,1453,1462,1471,1479,1486,1493,1502,1511,1519,1527,1536,1545,1555,1562,1571,1582,1591,1601,1611,1619,1627,1634,1640,1649,1660,1666,1675,1683,1692,1700,1708,1713,1721,1726,1736,1742,1750,1756,1761,1769,1775,1784,1793,1803,1818,1834,1854,1873,1893,1908,1916,1928,1936,1944,1956,1966,1974,1981,1989,1995,2004,2012,2020,2030,2037,2047,2057,2068,2079,2088,2096,2105,2116,2126,2134,2145,2156,2161,2168,2175,2186,2194,2202,2215,2224,2238,2251,2262,2276,2289,2302,2315,2327,2346,2361,2386,2400,2413,2425,2436,2447,2462,2474,2484,2494,2508,2519,2528,2541,2556,2565,2574,2585,2596,2601,2611,2619,2626,2634,2642,2651,2660,2668,2674,2691,2701,2716,2733,2748,2763,2778,2792,2802,2812,2819,2823,2828,2835,2845,2850,2853,2858,2867,2876,2888,2899,2911,2923,2933,2952,2972,2993,3016,3044,3069,3092,3116,3139,3160,3173,3182,3195,3204,3215,3223,3236,3248,3258,3266,3274,3281,3288,3296,3303,3312,3323,3330,3337,3347,3355,3364,3371,3379,3386,3393,3404,3415,3425,3434,3442,3451,3460,3470,3481,3489,3498,3504,3515,3524,3534,3540,3549,3556,3564,3569,3577,3584,3588,3596,3607,3614,3621,3629,3638,3646,3655,3664,3672,3679,3691,3699,3705,3718,3733,3746,3760,3776,3789,3813,3840,3865,3891,3915,3942,3971,3987,3997,4013,4032,4054,4064,4069,4080,4090,4099,4106,4115,4126,4133,4141,4150,4159,4167,4174,4183,4192,4200,4211,4219,4230,4239,4248,4257,4265,4273,4283,4288,4295,4304,4317,4324,4336,4348,4359,4373,4386,4399,4415,4433,4454,4474,4487,4496,4506,4516,4525,4531,4539,4546,4557,4565,4575,4584,4593,4599,4607,4612,4617,4624,4631,4646,4666,4682,4706,4727,4750,4767,4785,4811,4829,4853,4874,4896,4918,4942,4969,4996,5030,5056,5079,5087,5094,5100,5105,5111,5116,5126,5130,5136,5143,5151,5156,5162,5169,5178,5186,5193,5200,5209,5218,5223,5230,5237,5242,5254,5268,5287,5314,5332,5358,5386,5415,5430,5448,5461,5476,5495,5513,5543,5571,5597,5617,5642,5673,5703,5728,5759,5801,5830,5855,5883,5910,5932,5964,5994,6017,6044,6073,6099,6126,6138,6156,6177,6194,6208,6222];
+function quranAyahPage(surah, ayah){
+  const id = QURAN_SURAH_FIRST_ID[surah-1] + ayah - 1;
+  let lo = 0, hi = QURAN_PAGE_FIRST_ID.length - 1;
+  while(lo < hi){ const mid = (lo+hi+1) >> 1; if(QURAN_PAGE_FIRST_ID[mid] <= id) lo = mid; else hi = mid - 1; }
+  return lo + 1;
+}
+
+function mzRangeLabel(m){
+  if(!m.surah) return `من صفحة <b>${m.pageFrom}</b> إلى صفحة <b>${m.pageTo}</b>`;
+  const a = QURAN_SURAH_NAMES[m.surah-1], tSurah = m.surahTo || m.surah;
+  const text = tSurah===m.surah
+    ? `سورة <b>${a}</b> من الآية <b>${m.ayahFrom}</b> إلى الآية <b>${m.ayahTo}</b>`
+    : `من سورة <b>${a}</b> آية <b>${m.ayahFrom}</b> إلى سورة <b>${QURAN_SURAH_NAMES[tSurah-1]}</b> آية <b>${m.ayahTo}</b>`;
+  return `${text} (ص ${m.pageFrom}${m.pageTo!==m.pageFrom ? '–'+m.pageTo : ''})`;
+}
 
 /* Finds (or creates) a student profile by name from a logged
    memorization session — mirrors upsertStudentFromExam, so a teacher
@@ -5296,16 +5319,38 @@ function memorizationView(){
       <option value="review">مراجعة</option>
     </select>
   </div>
+  <div class="field">
+    <label>السورة</label>
+    <select id="mz-surah">
+      <option value="" disabled selected>اختر السورة</option>
+      ${QURAN_SURAH_NAMES.map((n,i)=>`<option value="${i+1}">${i+1}. ${n}</option>`).join('')}
+    </select>
+  </div>
   <div style="display:flex; gap:10px;">
     <div class="field" style="flex:1;">
-      <label>من صفحة</label>
-      <input type="number" id="mz-from" min="1" max="${MUSHAF_TOTAL_PAGES}" placeholder="1">
+      <label>من الآية</label>
+      <input class="plain-input" type="number" id="mz-ayah-from" min="1" inputmode="numeric" placeholder="1">
     </div>
     <div class="field" style="flex:1;">
-      <label>إلى صفحة</label>
-      <input type="number" id="mz-to" min="1" max="${MUSHAF_TOTAL_PAGES}" placeholder="1">
+      <label>إلى الآية</label>
+      <input class="plain-input" type="number" id="mz-ayah-to" min="1" inputmode="numeric" placeholder="1">
     </div>
   </div>
+  <div style="display:flex; align-items:center; gap:8px; margin:-6px 0 10px;">
+    <button type="button" class="link-btn" id="mz-to-end" style="font-size:12px;">إلى نهاية السورة</button>
+    <span id="mz-ayah-hint" style="font-size:11.5px; color:var(--ink-soft);"></span>
+  </div>
+  <details class="mz-other-surah">
+    <summary>الحصة بتمتد لسورة تانية؟</summary>
+    <div class="field" style="margin-top:8px;">
+      <label>تنتهي في سورة</label>
+      <select id="mz-surah-to">
+        <option value="">نفس السورة</option>
+        ${QURAN_SURAH_NAMES.map((n,i)=>`<option value="${i+1}">${i+1}. ${n}</option>`).join('')}
+      </select>
+    </div>
+  </details>
+  <div id="mz-pages-preview" class="mz-preview" style="display:none;"></div>
   <div class="field">
     <label>مستوى التسميع</label>
     <select id="mz-quality">
@@ -5332,7 +5377,7 @@ function memorizationView(){
         <div class="record-score ${m.type==='new' ? 'score-high':'score-mid'}">${typeLabel}</div>
       </div>
       <div class="record-meta">
-        من صفحة <b>${m.pageFrom}</b> إلى صفحة <b>${m.pageTo}</b> · التسميع: <b>${escapeHtml(m.quality)}</b> · التاريخ: <b>${d}</b>
+        ${mzRangeLabel(m)} · التسميع: <b>${escapeHtml(m.quality)}</b> · التاريخ: <b>${d}</b>
         ${m.note ? `<br>ملاحظة: <b>${escapeHtml(m.note)}</b>` : ''}
       </div>
       <button class="link-btn mz-del" data-id="${m.id}" style="color:var(--red); font-size:12px; margin-top:4px;">حذف</button>
@@ -5341,27 +5386,77 @@ function memorizationView(){
   `;
 }
 
+/* Reads the surah/ayah fields of the memorization form and converts the
+   range to Madina-mushaf pages (inclusive of the first and last page). */
+function mzReadRange(){
+  const el = id => document.getElementById(id);
+  const surah = parseInt(el('mz-surah').value, 10);
+  const surahToRaw = parseInt(el('mz-surah-to').value, 10);
+  const surahTo = surahToRaw || surah;
+  const ayahFrom = parseInt(el('mz-ayah-from').value, 10);
+  const ayahTo = parseInt(el('mz-ayah-to').value, 10);
+  if(!surah) return { error:'اختر السورة' };
+  if(!ayahFrom || !ayahTo) return { error:'اكتب رقم الآية (من / إلى)' };
+  const maxFrom = QURAN_SURAH_AYAH_COUNT[surah-1], maxTo = QURAN_SURAH_AYAH_COUNT[surahTo-1];
+  if(ayahFrom<1 || ayahFrom>maxFrom) return { error:`سورة ${QURAN_SURAH_NAMES[surah-1]} فيها ${arCount(maxFrom,'آية واحدة','آيتان','آيات','آية')} فقط` };
+  if(ayahTo<1 || ayahTo>maxTo) return { error:`سورة ${QURAN_SURAH_NAMES[surahTo-1]} فيها ${arCount(maxTo,'آية واحدة','آيتان','آيات','آية')} فقط` };
+  if(surahTo < surah) return { error:'السورة الأخيرة لازم تكون بعد السورة الأولى' };
+  if(surahTo === surah && ayahTo < ayahFrom) return { error:'الآية الأخيرة لازم تكون بعد الآية الأولى' };
+  return {
+    surah, surahTo, ayahFrom, ayahTo,
+    pageFrom: quranAyahPage(surah, ayahFrom),
+    pageTo: quranAyahPage(surahTo, ayahTo),
+  };
+}
+function arCount(n, one, two, few, many){
+  if(n===1) return one; if(n===2) return two; return n + ' ' + (n>=3 && n<=10 ? few : many);
+}
+function mzUpdatePreview(){
+  const surah = parseInt(document.getElementById('mz-surah').value, 10);
+  const toRaw = parseInt(document.getElementById('mz-surah-to').value, 10);
+  const hint = document.getElementById('mz-ayah-hint');
+  if(hint) hint.textContent = surah ? `عدد آيات ${QURAN_SURAH_NAMES[surah-1]}: ${QURAN_SURAH_AYAH_COUNT[surah-1]}` : '';
+  const box = document.getElementById('mz-pages-preview');
+  if(!box) return;
+  const r = mzReadRange();
+  if(r.error){ box.style.display = 'none'; return; }
+  const n = r.pageTo - r.pageFrom + 1;
+  box.style.display = 'block';
+  box.innerHTML = r.pageFrom===r.pageTo
+    ? `الصفحة <b>${r.pageFrom}</b> من المصحف`
+    : `من صفحة <b>${r.pageFrom}</b> إلى صفحة <b>${r.pageTo}</b> (${arCount(n,'صفحة واحدة','صفحتان','صفحات','صفحة')})`;
+}
+
 function attachMemorizationHandlers(){
+  ['mz-surah','mz-surah-to','mz-ayah-from','mz-ayah-to'].forEach(id=>{
+    const e = document.getElementById(id);
+    if(e){ e.oninput = mzUpdatePreview; e.onchange = mzUpdatePreview; }
+  });
+  const toEnd = document.getElementById('mz-to-end');
+  if(toEnd) toEnd.onclick = ()=>{
+    const surah = parseInt(document.getElementById('mz-surah').value, 10);
+    if(!surah){ showToast('اختر السورة أولاً'); return; }
+    const toSurah = parseInt(document.getElementById('mz-surah-to').value, 10) || surah;
+    document.getElementById('mz-ayah-to').value = QURAN_SURAH_AYAH_COUNT[toSurah-1];
+    mzUpdatePreview();
+  };
   const saveBtn = document.getElementById('btn-save-memorization');
   if(saveBtn) saveBtn.onclick = async ()=>{
     const errEl = document.getElementById('mz-error');
     if(errEl) errEl.textContent = '';
     const studentName = document.getElementById('mz-student').value.trim();
     const type = document.getElementById('mz-type').value;
-    const pageFrom = parseInt(document.getElementById('mz-from').value, 10);
-    const pageTo = parseInt(document.getElementById('mz-to').value, 10);
     const quality = document.getElementById('mz-quality').value;
     const note = document.getElementById('mz-note').value.trim();
-
     if(!studentName){ if(errEl) errEl.textContent='اكتب اسم الطالب'; return; }
-    if(!pageFrom || !pageTo || pageFrom<1 || pageTo<1 || pageFrom>MUSHAF_TOTAL_PAGES || pageTo>MUSHAF_TOTAL_PAGES){
-      if(errEl) errEl.textContent = `اكتب أرقام صفحات صحيحة (بين 1 و ${MUSHAF_TOTAL_PAGES})`; return;
-    }
+    const rng = mzReadRange();
+    if(rng.error){ if(errEl) errEl.textContent = rng.error; return; }
+    const { surah, surahTo, ayahFrom, ayahTo, pageFrom, pageTo } = rng;
 
     const record = {
       id: 'mz_' + Date.now(),
       studentName, teacherName: state.currentTeacherLink,
-      type, pageFrom, pageTo, quality, note,
+      type, surah, ayahFrom, surahTo, ayahTo, pageFrom, pageTo, quality, note,
       date: new Date().toISOString(),
       recordedBy: state.currentUser,
     };
@@ -5996,7 +6091,7 @@ function studentDetailView(){
       ${mySessions.slice(0,10).map(m=>{
         const d = new Date(m.date).toLocaleDateString('ar-EG', {year:'numeric', month:'short', day:'numeric'});
         const typeLabel = m.type==='new' ? 'حفظ جديد' : 'مراجعة';
-        return `<div class="backup-row"><span style="font-size:12.5px;">صفحة ${m.pageFrom}-${m.pageTo} · ${typeLabel} · ${escapeHtml(m.quality)}<br><span style="font-size:11px;color:var(--ink-soft);">${escapeHtml(m.teacherName||'—')} · ${d}</span></span></div>`;
+        return `<div class="backup-row"><span style="font-size:12.5px;">${m.surah ? 'سورة '+QURAN_SURAH_NAMES[m.surah-1]+' '+m.ayahFrom+'–'+m.ayahTo+' (ص '+m.pageFrom+'–'+m.pageTo+')' : 'صفحة '+m.pageFrom+'-'+m.pageTo} · ${typeLabel} · ${escapeHtml(m.quality)}<br><span style="font-size:11px;color:var(--ink-soft);">${escapeHtml(m.teacherName||'—')} · ${d}</span></span></div>`;
       }).join('')}
     </div>`;
   })()}
