@@ -705,6 +705,29 @@ html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
 .mz-preview{ padding:10px 14px; margin:0 0 14px; border:1.5px dashed var(--gold,#C08A28); border-radius:12px; background:var(--gold-soft,rgba(192,138,40,.12)); font-size:13px; color:var(--ink); }
 .mz-other-surah{ margin:0 0 12px; font-size:12.5px; }
 .mz-other-surah summary{ cursor:pointer; color:var(--green); font-weight:700; }
+.dir-toggle{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.dir-toggle button{ display:flex; flex-direction:column; align-items:center; gap:2px; padding:9px 6px; border:1.5px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink-soft); font-family:'Tajawal'; font-weight:700; font-size:14px; cursor:pointer; transition:all .15s; }
+.dir-toggle button small{ font-weight:500; font-size:11px; opacity:.85; }
+.dir-toggle button.on{ background:var(--green); border-color:var(--green); color:#fff; }
+.surah-picker{ position:relative; }
+.surah-picker .surah-search{ width:100%; padding-left:38px; }
+.surah-clear{ position:absolute; left:8px; top:8px; width:28px; height:28px; border:none; border-radius:50%; background:var(--line); color:var(--ink); cursor:pointer; font-size:12px; }
+.surah-results{ position:absolute; z-index:30; right:0; left:0; top:calc(100% + 4px); max-height:240px; overflow-y:auto; background:var(--paper); border:1.5px solid var(--gold,#C08A28); border-radius:12px; box-shadow:0 10px 26px rgba(0,0,0,.18); }
+.surah-results[hidden]{ display:none; }
+.surah-opt{ display:flex; justify-content:space-between; align-items:center; width:100%; padding:10px 14px; border:none; border-bottom:1px solid var(--line); background:none; color:var(--ink); font-family:'Tajawal'; font-size:14.5px; font-weight:600; cursor:pointer; text-align:right; }
+.surah-opt:last-child{ border-bottom:none; }
+.surah-opt:hover,.surah-opt:focus-visible{ background:var(--gold-soft,rgba(192,138,40,.14)); }
+.surah-opt small{ font-weight:500; font-size:11px; color:var(--ink-soft); }
+.surah-none{ padding:12px 14px; font-size:13px; color:var(--ink-soft); }
+#mz-add-seg{ padding:11px; border:1.5px dashed var(--green); border-radius:12px; background:transparent; color:var(--green); font-family:'Tajawal'; font-weight:800; font-size:14px; cursor:pointer; }
+.mz-seg{ border:1.5px solid var(--line); border-radius:14px; padding:10px; margin-bottom:8px; background:var(--paper); }
+.mz-seg-head{ display:flex; align-items:center; gap:8px; }
+.mz-seg-n{ flex:none; width:24px; height:24px; border-radius:50%; background:var(--green); color:#fff; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+.mz-seg-del{ flex:none; width:28px; height:28px; border:none; border-radius:50%; background:var(--line); color:var(--ink); cursor:pointer; font-size:12px; }
+.mz-seg-del[hidden]{ display:none; }
+.mz-seg-ayahs{ display:flex; gap:8px; align-items:flex-end; margin-top:8px; }
+.mz-seg-ayahs label{ flex:1; font-size:12px; font-weight:700; color:var(--ink-soft); display:flex; flex-direction:column; gap:4px; }
+.mz-seg-hint{ font-size:11px; color:var(--ink-soft); margin-top:4px; }
 </style>
 </head>
 <body>
@@ -1847,10 +1870,32 @@ function quranRangeCoverage(startId, endId){
   return out;
 }
 function roundQuarter(x){ return x > 0 ? Math.max(0.25, Math.round(x*4)/4) : 0; }
+/* The ayah-id ranges a session covers. Ascending sessions (to-surah after
+   from-surah) are one continuous stretch. Descending sessions (e.g. from
+   An-Nas back toward Al-Baqarah) read each surah in its normal order, so
+   they cover: the first surah from ayahFrom to its end, every surah in
+   between, and the last surah from its start to ayahTo. */
+function mzSessionRanges(m){
+  const X = m.surah, Y = m.surahTo || m.surah;
+  const lastId = sn => QURAN_SURAH_FIRST_ID[sn-1] + QURAN_SURAH_AYAH_COUNT[sn-1] - 1;
+  if(Y === X) return [[quranAyahId(X, m.ayahFrom), quranAyahId(X, m.ayahTo)]];
+  if(Y > X) return [[quranAyahId(X, m.ayahFrom), quranAyahId(Y, m.ayahTo)]];
+  const r = [[quranAyahId(Y, 1), quranAyahId(Y, m.ayahTo)]];
+  if(X - Y > 1) r.push([QURAN_SURAH_FIRST_ID[Y], lastId(X-1)]);
+  r.push([quranAyahId(X, m.ayahFrom), lastId(X)]);
+  return r;
+}
+function mzCoverageFromRanges(ranges){
+  const cum = {};
+  ranges.forEach(([a,b])=>{
+    const cov = quranRangeCoverage(a, b);
+    Object.keys(cov).forEach(k=>{ cum[k] = Math.min(1, (cum[k]||0) + cov[k]); });
+  });
+  return cum;
+}
 function mzCoverageOf(m){
   if(m.surah){
-    const sT = m.surahTo || m.surah;
-    return quranRangeCoverage(quranAyahId(m.surah, m.ayahFrom), quranAyahId(sT, m.ayahTo));
+    return mzCoverageFromRanges(mzSessionRanges(m));
   }
   const out = {}; const f = Math.min(m.pageFrom, m.pageTo), t = Math.max(m.pageFrom, m.pageTo);
   for(let pg=f; pg<=t; pg++) out[pg] = 1;
@@ -1871,7 +1916,7 @@ function mzRangeLabel(m){
   const a = QURAN_SURAH_NAMES[m.surah-1], tSurah = m.surahTo || m.surah;
   const text = tSurah===m.surah
     ? `سورة <b>${a}</b> من الآية <b>${m.ayahFrom}</b> إلى الآية <b>${m.ayahTo}</b>`
-    : `من سورة <b>${a}</b> آية <b>${m.ayahFrom}</b> إلى سورة <b>${QURAN_SURAH_NAMES[tSurah-1]}</b> آية <b>${m.ayahTo}</b>`;
+    : `من سورة <b>${a}</b> آية <b>${m.ayahFrom}</b> إلى سورة <b>${QURAN_SURAH_NAMES[tSurah-1]}</b> آية <b>${m.ayahTo}</b>${tSurah < m.surah ? ' (تنازلي)' : ''}`;
   return `${text} (ص ${m.pageFrom}${m.pageTo!==m.pageFrom ? '–'+m.pageTo : ''}${m.pagesAmount ? ' · '+pagesAmountLabel(m.pagesAmount) : ''})`;
 }
 
@@ -5362,6 +5407,13 @@ function memorizationView(){
     <datalist id="student-list-mz">${studentSuggestions()}</datalist>
   </div>
   <div class="field">
+    <label>اتجاه حفظ الطالب</label>
+    <div class="dir-toggle" id="mz-dir">
+      <button type="button" data-dir="asc" class="${mzDirection==='asc'?'on':''}">↑ تصاعدي<small>من البقرة نحو الناس</small></button>
+      <button type="button" data-dir="desc" class="${mzDirection==='desc'?'on':''}">↓ تنازلي<small>من الناس نحو البقرة</small></button>
+    </div>
+  </div>
+  <div class="field">
     <label>نوع الحصة</label>
     <select id="mz-type">
       <option value="new">حفظ جديد</option>
@@ -5369,36 +5421,11 @@ function memorizationView(){
     </select>
   </div>
   <div class="field">
-    <label>السورة</label>
-    <select id="mz-surah">
-      <option value="" disabled selected>اختر السورة</option>
-      ${QURAN_SURAH_NAMES.map((n,i)=>`<option value="${i+1}">${i+1}. ${n}</option>`).join('')}
-    </select>
+    <label>السور المسمَّعة</label>
+    <div id="mz-segs"></div>
+    <button type="button" class="btn btn-secondary" id="mz-add-seg" style="margin-top:8px; width:100%;">＋ سورة أخرى</button>
+    <div id="mz-dir-hint" style="font-size:11.5px; color:var(--ink-soft); margin-top:6px;"></div>
   </div>
-  <div style="display:flex; gap:10px;">
-    <div class="field" style="flex:1;">
-      <label>من الآية</label>
-      <input class="plain-input" type="number" id="mz-ayah-from" min="1" inputmode="numeric" placeholder="1">
-    </div>
-    <div class="field" style="flex:1;">
-      <label>إلى الآية</label>
-      <input class="plain-input" type="number" id="mz-ayah-to" min="1" inputmode="numeric" placeholder="1">
-    </div>
-  </div>
-  <div style="display:flex; align-items:center; gap:8px; margin:-6px 0 10px;">
-    <button type="button" class="link-btn" id="mz-to-end" style="font-size:12px;">إلى نهاية السورة</button>
-    <span id="mz-ayah-hint" style="font-size:11.5px; color:var(--ink-soft);"></span>
-  </div>
-  <details class="mz-other-surah">
-    <summary>الحصة بتمتد لسورة تانية؟</summary>
-    <div class="field" style="margin-top:8px;">
-      <label>تنتهي في سورة</label>
-      <select id="mz-surah-to">
-        <option value="">نفس السورة</option>
-        ${QURAN_SURAH_NAMES.map((n,i)=>`<option value="${i+1}">${i+1}. ${n}</option>`).join('')}
-      </select>
-    </div>
-  </details>
   <div id="mz-pages-preview" class="mz-preview" style="display:none;"></div>
   <div class="field">
     <label>مستوى التسميع</label>
@@ -5435,61 +5462,207 @@ function memorizationView(){
   `;
 }
 
-/* Reads the surah/ayah fields of the memorization form and converts the
-   range to Madina-mushaf pages (inclusive of the first and last page). */
-function mzReadRange(){
-  const el = id => document.getElementById(id);
-  const surah = parseInt(el('mz-surah').value, 10);
-  const surahToRaw = parseInt(el('mz-surah-to').value, 10);
-  const surahTo = surahToRaw || surah;
-  const ayahFrom = parseInt(el('mz-ayah-from').value, 10);
-  const ayahTo = parseInt(el('mz-ayah-to').value, 10);
-  if(!surah) return { error:'اختر السورة' };
-  if(!ayahFrom || !ayahTo) return { error:'اكتب رقم الآية (من / إلى)' };
-  const maxFrom = QURAN_SURAH_AYAH_COUNT[surah-1], maxTo = QURAN_SURAH_AYAH_COUNT[surahTo-1];
-  if(ayahFrom<1 || ayahFrom>maxFrom) return { error:`سورة ${QURAN_SURAH_NAMES[surah-1]} فيها ${arCount(maxFrom,'آية واحدة','آيتان','آيات','آية')} فقط` };
-  if(ayahTo<1 || ayahTo>maxTo) return { error:`سورة ${QURAN_SURAH_NAMES[surahTo-1]} فيها ${arCount(maxTo,'آية واحدة','آيتان','آيات','آية')} فقط` };
-  if(surahTo < surah) return { error:'السورة الأخيرة لازم تكون بعد السورة الأولى' };
-  if(surahTo === surah && ayahTo < ayahFrom) return { error:'الآية الأخيرة لازم تكون بعد الآية الأولى' };
-  const cov = quranRangeCoverage(quranAyahId(surah, ayahFrom), quranAyahId(surahTo, ayahTo));
-  const pagesAmount = roundQuarter(Object.values(cov).reduce((a,b)=>a+b, 0));
-  return {
-    surah, surahTo, ayahFrom, ayahTo,
-    pageFrom: quranAyahPage(surah, ayahFrom),
-    pageTo: quranAyahPage(surahTo, ayahTo),
-    pagesAmount,
+/* Searchable surah picker (replaces a 114-item dropdown). A hidden input
+   with the given id holds the chosen surah number; typing filters by name
+   (ignoring diacritics / hamza forms) or number. */
+let mzDirection = 'asc'; // 'asc' (Baqarah → Nas) or 'desc' (Nas → Baqarah)
+function surahPickerHTML(id, placeholder, clearable){
+  return `
+  <div class="surah-picker" data-for="${id}">
+    <input type="hidden" id="${id}" value="">
+    <input type="text" class="plain-input surah-search" placeholder="${placeholder}" autocomplete="off" autocapitalize="off" spellcheck="false">
+    ${clearable ? `<button type="button" class="surah-clear" aria-label="مسح" hidden>✕</button>` : ''}
+    <div class="surah-results" hidden></div>
+  </div>`;
+}
+function initSurahPickers(onChange, scope){
+  (scope||document).querySelectorAll('.surah-picker').forEach(root=>{
+    const hidden = root.querySelector('input[type=hidden]');
+    const input = root.querySelector('.surah-search');
+    const box = root.querySelector('.surah-results');
+    const clear = root.querySelector('.surah-clear');
+    const norm = t => normArName(String(t).replace(/[٠-٩]/g, d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    function matches(q){
+      const nq = norm(q);
+      if(!nq) return QURAN_SURAH_NAMES.map((n,i)=>i+1);
+      const num = /^\d+$/.test(nq) ? parseInt(nq,10) : null;
+      const starts = [], contains = [];
+      QURAN_SURAH_NAMES.forEach((n,i)=>{
+        const nn = norm(n).replace(/^ال/,'');
+        const full = norm(n);
+        if(num !== null){ if(String(i+1)===nq || String(i+1).startsWith(nq)) starts.push(i+1); return; }
+        if(nn.startsWith(nq.replace(/^ال/,'')) || full.startsWith(nq)) starts.push(i+1);
+        else if(full.includes(nq)) contains.push(i+1);
+      });
+      return starts.concat(contains);
+    }
+    function showList(){
+      const list = matches(input.dataset.typing==='1' ? input.value : '');
+      box.innerHTML = list.length
+        ? list.map(n=>`<button type="button" class="surah-opt" data-n="${n}"><span>${QURAN_SURAH_NAMES[n-1]}</span><small>${n} · ${QURAN_SURAH_AYAH_COUNT[n-1]} آية</small></button>`).join('')
+        : `<div class="surah-none">ما في سورة بهالاسم</div>`;
+      box.hidden = false;
+    }
+    function choose(n){
+      hidden.value = n ? String(n) : '';
+      input.value = n ? `${n}. ${QURAN_SURAH_NAMES[n-1]}` : '';
+      input.dataset.typing = '0';
+      if(clear) clear.hidden = !n;
+      box.hidden = true;
+      hidden.dispatchEvent(new Event('change', { bubbles:true }));
+      if(onChange) onChange();
+    }
+    input.onfocus = ()=>{ input.select(); input.dataset.typing = '0'; showList(); };
+    input.oninput = ()=>{ input.dataset.typing = '1'; if(!input.value && hidden.value){ hidden.value=''; if(clear) clear.hidden = true; if(onChange) onChange(); } showList(); };
+    input.onkeydown = ev=>{
+      if(ev.key==='Enter'){ ev.preventDefault(); const first = box.querySelector('.surah-opt'); if(first) choose(+first.dataset.n); }
+      if(ev.key==='Escape'){ box.hidden = true; input.blur(); }
+    };
+    input.onblur = ()=>{ setTimeout(()=>{ box.hidden = true; if(hidden.value) input.value = `${hidden.value}. ${QURAN_SURAH_NAMES[hidden.value-1]}`; else if(!clearableKeepText(root)) input.value = ''; }, 180); };
+    box.onclick = ev=>{ const b = ev.target.closest('.surah-opt'); if(b) choose(+b.dataset.n); };
+    if(clear) clear.onclick = ()=>{ choose(0); };
+  });
+}
+function clearableKeepText(root){ return false; }
+function mzSetDirection(dir, silent){
+  mzDirection = dir === 'desc' ? 'desc' : 'asc';
+  document.querySelectorAll('#mz-dir button').forEach(b=> b.classList.toggle('on', b.dataset.dir === mzDirection));
+  const hint = document.getElementById('mz-dir-hint');
+  if(hint) hint.textContent = mzDirection==='desc'
+    ? 'تنازلي: كل سورة بتيجي قبل اللي قبلها بالمصحف (الناس ← الفلق ← الإخلاص). زر «سورة أخرى» بيقترح التالية تلقائياً.'
+    : 'تصاعدي: كل سورة بتيجي بعد اللي قبلها بالمصحف (الإخلاص ← الفلق ← الناس). زر «سورة أخرى» بيقترح التالية تلقائياً.';
+  if(!silent) mzUpdatePreview();
+}
+/* The student's usual direction: what was last used for them, else
+   inferred from their latest session that crossed surahs. */
+function studentMzDirection(name){
+  const key = (name||'').trim().toLowerCase();
+  if(!key) return null;
+  const st = state.students.find(x=>x.name.trim().toLowerCase()===key);
+  if(st && st.mzDirection) return st.mzDirection;
+  const last = state.memorization
+    .filter(m=>m.studentName.trim().toLowerCase()===key && m.surah && m.surahTo && m.surahTo!==m.surah)
+    .sort((a,b)=> new Date(b.date)-new Date(a.date))[0];
+  return last ? (last.surahTo < last.surah ? 'desc' : 'asc') : null;
+}
+
+/* A session is a list of segments (surah + from/to ayah). Each segment
+   is saved as its own record so history shows every surah separately. */
+function mzSegHTML(i){
+  return `<div class="mz-seg" data-seg="${i}">
+    <div class="mz-seg-head"><span class="mz-seg-n">${i+1}</span>
+      <div style="flex:1;">${surahPickerHTML('mz-s-'+i, 'ابحث عن السورة بالاسم أو الرقم...')}</div>
+      <button type="button" class="mz-seg-del" aria-label="حذف السورة" ${i===0?'hidden':''}>✕</button>
+    </div>
+    <div class="mz-seg-ayahs">
+      <label>من الآية <input class="plain-input mz-from" type="number" min="1" inputmode="numeric" placeholder="1"></label>
+      <label>إلى الآية <input class="plain-input mz-to" type="number" min="1" inputmode="numeric" placeholder="—"></label>
+      <button type="button" class="link-btn mz-end" style="font-size:12px;">كاملة</button>
+    </div>
+    <div class="mz-seg-hint"></div>
+  </div>`;
+}
+function mzSegments(){ return [...document.querySelectorAll('#mz-segs .mz-seg')]; }
+function mzAddSegment(prefillSurah){
+  const box = document.getElementById('mz-segs');
+  const i = box.children.length ? Math.max(...mzSegments().map(e=>+e.dataset.seg)) + 1 : 0;
+  box.insertAdjacentHTML('beforeend', mzSegHTML(i));
+  const row = box.lastElementChild;
+  initSurahPickers(()=>mzOnSurahPicked(row), row);
+  row.querySelector('.mz-from').oninput = row.querySelector('.mz-to').oninput = mzUpdatePreview;
+  row.querySelector('.mz-end').onclick = ()=>{
+    const n = +row.querySelector('input[type=hidden]').value;
+    if(!n){ showToast('اختر السورة أولاً'); return; }
+    row.querySelector('.mz-to').value = QURAN_SURAH_AYAH_COUNT[n-1]; mzUpdatePreview();
   };
+  row.querySelector('.mz-seg-del').onclick = ()=>{ row.remove(); mzRenumber(); mzUpdatePreview(); };
+  if(prefillSurah){
+    const pick = row.querySelector('.surah-picker');
+    pick.querySelector('input[type=hidden]').value = prefillSurah;
+    pick.querySelector('.surah-search').value = `${prefillSurah}. ${QURAN_SURAH_NAMES[prefillSurah-1]}`;
+    mzOnSurahPicked(row);
+  }
+  mzRenumber();
+  return row;
+}
+function mzRenumber(){ mzSegments().forEach((r,k)=>{ r.querySelector('.mz-seg-n').textContent = k+1; r.querySelector('.mz-seg-del').hidden = (k===0 && mzSegments().length===1); }); }
+/* Choosing a surah pre-fills the whole surah (1 → last ayah) so a complete
+   surah is a single tap; edit the numbers only for partial ones. */
+function mzOnSurahPicked(row){
+  const n = +row.querySelector('input[type=hidden]').value;
+  const hint = row.querySelector('.mz-seg-hint');
+  if(n){
+    row.querySelector('.mz-from').value = 1;
+    row.querySelector('.mz-to').value = QURAN_SURAH_AYAH_COUNT[n-1];
+    hint.textContent = `عدد آيات ${QURAN_SURAH_NAMES[n-1]}: ${QURAN_SURAH_AYAH_COUNT[n-1]}`;
+  } else hint.textContent = '';
+  mzUpdatePreview();
+}
+function mzNextSurahSuggestion(){
+  const rows = mzSegments();
+  const last = rows.length ? +rows[rows.length-1].querySelector('input[type=hidden]').value : 0;
+  if(!last) return 0;
+  const nx = mzDirection==='desc' ? last-1 : last+1;
+  return nx>=1 && nx<=114 ? nx : 0;
+}
+function mzReadSegments(){
+  const rows = mzSegments(), out = [];
+  if(!rows.length) return { error:'اختر السورة' };
+  let prev = 0;
+  for(let k=0;k<rows.length;k++){
+    const r = rows[k], tag = rows.length>1 ? ` (السورة ${k+1})` : '';
+    const surah = +r.querySelector('input[type=hidden]').value;
+    const ayahFrom = parseInt(r.querySelector('.mz-from').value,10);
+    const ayahTo = parseInt(r.querySelector('.mz-to').value,10);
+    if(!surah) return { error:'اختر السورة'+tag };
+    if(!ayahFrom || !ayahTo) return { error:'اكتب رقم الآية (من / إلى)'+tag };
+    const max = QURAN_SURAH_AYAH_COUNT[surah-1], nm = QURAN_SURAH_NAMES[surah-1];
+    if(ayahFrom<1 || ayahFrom>max || ayahTo<1 || ayahTo>max) return { error:`سورة ${nm} فيها ${arCount(max,'آية واحدة','آيتان','آيات','آية')} فقط` };
+    if(ayahTo < ayahFrom) return { error:`في سورة ${nm}: الآية الأخيرة لازم تكون بعد الآية الأولى` };
+    if(prev){
+      if(surah===prev) return { error:`سورة ${nm} مكررة` };
+      if(mzDirection==='asc' && surah<prev) return { error:`الاتجاه تصاعدي: بعد ${QURAN_SURAH_NAMES[prev-1]} لازم تيجي سورة بعدها بالمصحف (مش ${nm}). إذا الطالب بيحفظ من الناس نحو البقرة غيّر الاتجاه إلى تنازلي.` };
+      if(mzDirection==='desc' && surah>prev) return { error:`الاتجاه تنازلي: بعد ${QURAN_SURAH_NAMES[prev-1]} لازم تيجي سورة قبلها بالمصحف (مش ${nm}). إذا الطالب بيحفظ تصاعدي غيّر الاتجاه.` };
+    }
+    prev = surah;
+    const cov = mzCoverageFromRanges([[quranAyahId(surah,ayahFrom), quranAyahId(surah,ayahTo)]]);
+    const pages = Object.keys(cov).map(Number);
+    out.push({ surah, surahTo:surah, ayahFrom, ayahTo, pageFrom:Math.min(...pages), pageTo:Math.max(...pages),
+               pagesAmount: roundQuarter(Object.values(cov).reduce((x,y)=>x+y,0)), direction: mzDirection });
+  }
+  return { segs: out };
 }
 function arCount(n, one, two, few, many){
   if(n===1) return one; if(n===2) return two; return n + ' ' + (n>=3 && n<=10 ? few : many);
 }
 function mzUpdatePreview(){
-  const surah = parseInt(document.getElementById('mz-surah').value, 10);
-  const toRaw = parseInt(document.getElementById('mz-surah-to').value, 10);
-  const hint = document.getElementById('mz-ayah-hint');
-  if(hint) hint.textContent = surah ? `عدد آيات ${QURAN_SURAH_NAMES[surah-1]}: ${QURAN_SURAH_AYAH_COUNT[surah-1]}` : '';
   const box = document.getElementById('mz-pages-preview');
   if(!box) return;
-  const r = mzReadRange();
+  const r = mzReadSegments();
   if(r.error){ box.style.display = 'none'; return; }
   box.style.display = 'block';
-  const where = r.pageFrom===r.pageTo ? `الصفحة <b>${r.pageFrom}</b>` : `من صفحة <b>${r.pageFrom}</b> إلى صفحة <b>${r.pageTo}</b>`;
-  box.innerHTML = `${where}<br>المقدار: <b>${pagesAmountLabel(r.pagesAmount)}</b>`;
+  const all = mzCoverageFromRanges(r.segs.map(g=>[quranAyahId(g.surah,g.ayahFrom), quranAyahId(g.surah,g.ayahTo)]));
+  const total = roundQuarter(Object.values(all).reduce((x,y)=>x+y,0));
+  const lines = r.segs.map(g=>`<div>${QURAN_SURAH_NAMES[g.surah-1]} (${g.ayahFrom}–${g.ayahTo}) · ${g.pageFrom===g.pageTo?'ص '+g.pageFrom:'ص '+g.pageFrom+'–'+g.pageTo} · ${pagesAmountLabel(g.pagesAmount)}</div>`).join('');
+  box.innerHTML = (r.segs.length>1 ? lines + '<hr style="border:none;border-top:1px dashed var(--line);margin:6px 0;">' : '')
+    + `المجموع: <b>${pagesAmountLabel(total)}</b>`
+    + (r.segs.length===1 ? `<br>${r.segs[0].pageFrom===r.segs[0].pageTo?`الصفحة <b>${r.segs[0].pageFrom}</b>`:`من صفحة <b>${r.segs[0].pageFrom}</b> إلى صفحة <b>${r.segs[0].pageTo}</b>`}` : '');
 }
 
 function attachMemorizationHandlers(){
-  ['mz-surah','mz-surah-to','mz-ayah-from','mz-ayah-to'].forEach(id=>{
-    const e = document.getElementById(id);
-    if(e){ e.oninput = mzUpdatePreview; e.onchange = mzUpdatePreview; }
+  mzAddSegment();
+  const addSeg = document.getElementById('mz-add-seg');
+  if(addSeg) addSeg.onclick = ()=>{ const row = mzAddSegment(mzNextSurahSuggestion()); const f = row.querySelector('.surah-search'); if(!f.value) f.focus(); };
+  document.querySelectorAll('#mz-dir button').forEach(b=>{
+    b.onclick = ()=> mzSetDirection(b.dataset.dir);
   });
-  const toEnd = document.getElementById('mz-to-end');
-  if(toEnd) toEnd.onclick = ()=>{
-    const surah = parseInt(document.getElementById('mz-surah').value, 10);
-    if(!surah){ showToast('اختر السورة أولاً'); return; }
-    const toSurah = parseInt(document.getElementById('mz-surah-to').value, 10) || surah;
-    document.getElementById('mz-ayah-to').value = QURAN_SURAH_AYAH_COUNT[toSurah-1];
-    mzUpdatePreview();
-  };
+  mzSetDirection(mzDirection, true);
+  const mzStudentEl = document.getElementById('mz-student');
+  if(mzStudentEl){
+    const applyStudentDir = ()=>{ const d = studentMzDirection(mzStudentEl.value); if(d) mzSetDirection(d); };
+    mzStudentEl.addEventListener('input', applyStudentDir);
+    mzStudentEl.addEventListener('change', applyStudentDir);
+  }
   const saveBtn = document.getElementById('btn-save-memorization');
   if(saveBtn) saveBtn.onclick = async ()=>{
     const errEl = document.getElementById('mz-error');
@@ -5499,19 +5672,19 @@ function attachMemorizationHandlers(){
     const quality = document.getElementById('mz-quality').value;
     const note = document.getElementById('mz-note').value.trim();
     if(!studentName){ if(errEl) errEl.textContent='اكتب اسم الطالب'; return; }
-    const rng = mzReadRange();
+    const rng = mzReadSegments();
     if(rng.error){ if(errEl) errEl.textContent = rng.error; return; }
-    const { surah, surahTo, ayahFrom, ayahTo, pageFrom, pageTo, pagesAmount } = rng;
-
-    const record = {
-      id: 'mz_' + Date.now(),
+    const base = Date.now(), nowIso = new Date().toISOString();
+    const records = rng.segs.map((g,i)=>({
+      id: 'mz_' + base + '_' + i,
       studentName, teacherName: state.currentTeacherLink,
-      type, surah, ayahFrom, surahTo, ayahTo, pageFrom, pageTo, pagesAmount, quality, note,
-      date: new Date().toISOString(),
-      recordedBy: state.currentUser,
-    };
-    state.memorization.unshift(record);
-    upsertStudentFromMemorization(record);
+      type, surah:g.surah, ayahFrom:g.ayahFrom, surahTo:g.surahTo, ayahTo:g.ayahTo,
+      pageFrom:g.pageFrom, pageTo:g.pageTo, pagesAmount:g.pagesAmount, direction:g.direction,
+      quality, note, date: nowIso, recordedBy: state.currentUser,
+    }));
+    state.memorization.unshift(...records);
+    const mzStudent = upsertStudentFromMemorization(records[0]);
+    if(mzStudent) mzStudent.mzDirection = mzDirection;
     await saveMemorization();
     await saveStudents();
     showToast('تم حفظ الحصة بنجاح');
