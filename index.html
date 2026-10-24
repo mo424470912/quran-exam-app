@@ -942,6 +942,8 @@ function withTimeout(promise, ms){
   ]);
 }
 
+const lastLocalWrite = {}; // key -> ms timestamp of the last save made on THIS device
+
 const storageAdapter = {
   async get(key){
     if (firestoreDb) {
@@ -1008,6 +1010,7 @@ const storageAdapter = {
       // retries anything still marked pending, on every app start and
       // every time connectivity returns.
       markPendingSync(key);
+      lastLocalWrite[key] = Date.now();
       firestoreDb.collection('quran_app').doc(key).set({ value })
         .then(() => clearPendingSync(key))
         .catch(e => console.warn('لم يتم رفع البيانات بعد لقاعدة البيانات — راح تترفع تلقائياً لما يتوفر إنترنت', e));
@@ -1201,7 +1204,83 @@ async function loadAppData(){
   state.loading = false;
   render();
   maybeShowScheduleReminder();
+  setTimeout(()=>{ syncFromServer(); }, 800);
 }
+
+/* Live refresh from the server. Opening the app reads Firestore's local
+   cache first (so it opens instantly, even offline) — which meant a
+   device never learned about changes made on OTHER devices (a new
+   account, an exam done by an examiner) until its cache happened to be
+   refreshed. This pulls fresh copies from the server in the background:
+   right after start-up, whenever the app comes back to the foreground or
+   regains internet, and every couple of minutes while it's open. It
+   never overwrites a key that still has unsent local changes, nor one
+   that was saved on this device while the request was in flight. */
+let syncingFromServer = false, pendingRerender = false;
+async function syncFromServer(manual){
+  if(!firestoreDb || state.loading) return false;
+  if(syncingFromServer) return false;
+  if(!navigator.onLine){ if(manual) showToast('ما في اتصال بالإنترنت'); return false; }
+  syncingFromServer = true;
+  let changed = false;
+  try{
+    await flushPendingSync();
+    const started = Date.now();
+    const pend = new Set(getPendingSyncKeys());
+    const keys = [
+      [STORAGE_EXAMS,'exams'], [STORAGE_STUDENTS,'students'], [STORAGE_SCHEDULE,'schedule'],
+      [STORAGE_NOTIFICATIONS,'notifications'], [STORAGE_MEMORIZATION,'memorization'],
+      [STORAGE_IMPORT_BATCHES,'importBatches'], [STORAGE_CENTER_SETTINGS,'centerSettings'], [STORAGE_TRASH,'trash'],
+    ];
+    await Promise.all(keys.map(async ([key, prop])=>{
+      if(pend.has(key)) return;
+      let doc;
+      try{ doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 12000); }
+      catch(e){ return; }
+      if(!doc.exists) return;
+      if((lastLocalWrite[key]||0) >= started) return;      // saved here meanwhile — ours is newer
+      if(getPendingSyncKeys().includes(key)) return;
+      const val = doc.data().value;
+      let cur = null; try{ cur = localStorage.getItem(key); }catch(e){}
+      if(cur === val) return;
+      let parsed; try{ parsed = JSON.parse(val); }catch(e){ return; }
+      if(prop==='centerSettings'){ if(!parsed || typeof parsed!=='object') return; }
+      else if(!Array.isArray(parsed)) return;
+      state[prop] = parsed;
+      try{ localStorage.setItem(key, val); }catch(e){}
+      changed = true;
+    }));
+    if(changed){ applyCenterOverrides(); purgeOldTrash(); }
+    if(firebaseAuth){
+      const before = JSON.stringify(state.accounts.map(a=>[a.uid,a.username,a.role,a.disabled,a.teacherLink,a.email]));
+      await loadAccountsFromFirestore(true);
+      if(!accountsLoadFailed){
+        const after = JSON.stringify(state.accounts.map(a=>[a.uid,a.username,a.role,a.disabled,a.teacherLink,a.email]));
+        if(before !== after) changed = true;
+      }
+    }
+  }catch(e){ console.warn('تعذّر تحديث البيانات من الخادم', e); }
+  finally{ syncingFromServer = false; }
+  if(changed) rerenderWhenSafe();
+  if(manual) showToast(changed ? 'تم تحديث البيانات ✅' : 'البيانات محدّثة');
+  return changed;
+}
+/* Re-draw only when it won't wipe something the user is in the middle of. */
+function rerenderWhenSafe(){
+  const a = document.activeElement;
+  const typing = a && (a.tagName==='TEXTAREA' || a.tagName==='SELECT' || (a.tagName==='INPUT' && !['button','checkbox','radio','submit'].includes(a.type)));
+  const scoring = state.view==='test' && typeof testForm!=='undefined' && testForm.stage==='scoring';
+  if(typing || scoring){ pendingRerender = true; return; }
+  pendingRerender = false;
+  render();
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') syncFromServer(); });
+window.addEventListener('online', ()=>{ syncFromServer(); });
+setInterval(()=>{ if(document.visibilityState==='visible') syncFromServer(); }, 2*60*1000);
+document.addEventListener('click', ev=>{
+  if(ev.target.closest && ev.target.closest('#sync-status-badge')) syncFromServer(true);
+  else if(pendingRerender && ev.target.closest && ev.target.closest('.tab-btn')) pendingRerender = false;
+});
 
 let scheduleReminderShown = false;
 function maybeShowScheduleReminder(){
@@ -1217,17 +1296,18 @@ function maybeShowScheduleReminder(){
 
 let accountsLoadFailed = false; // true if a Firestore accounts read errored (e.g. blocked by security rules pre-login) — must NOT be treated as "zero accounts exist"
 
-async function loadAccountsFromFirestore(){
+async function loadAccountsFromFirestore(forceServer){
   try{
     // Same fast path as storageAdapter.get: try the on-device cache
     // first (near-instant even with zero connectivity), and only wait
     // on a real server round-trip if that comes up empty.
     let snap;
     try{
+      if(forceServer) throw new Error('force-server');
       snap = await withTimeout(firestoreDb.collection('users').get({ source: 'cache' }), 3000);
       if(snap.empty) throw new Error('empty-cache');
     }catch(e){
-      snap = await withTimeout(firestoreDb.collection('users').get(), 5000);
+      snap = await withTimeout(firestoreDb.collection('users').get(forceServer ? { source: 'server' } : undefined), forceServer ? 10000 : 5000);
     }
     state.accounts = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
     accountsLoadFailed = false;
@@ -2422,7 +2502,7 @@ function syncStatusBadge(){
     bg = 'rgba(255,255,255,0.15)'; text = '#fff';
     label = '✅ كل البيانات مرفوعة';
   }
-  return `<div id="sync-status-badge" style="display:inline-block; margin-top:4px; padding:3px 10px; border-radius:20px; font-size:10.5px; font-weight:700; background:${bg}; color:${text};">${label}</div>`;
+  return `<div id="sync-status-badge" title="اضغط لتحديث البيانات" style="display:inline-block; margin-top:4px; padding:3px 10px; border-radius:20px; font-size:10.5px; font-weight:700; cursor:pointer; background:${bg}; color:${text};">${label}${pending===0 && online ? ' · ↻' : ''}</div>`;
 }
 
 function mainScreen(){
@@ -7201,8 +7281,8 @@ function attachSettingsHandlers(){
   const refreshAcctsBtn = document.getElementById('btn-refresh-accounts');
   if(refreshAcctsBtn) refreshAcctsBtn.onclick = async ()=>{
     refreshAcctsBtn.disabled = true;
-    await loadAccountsFromFirestore();
-    showToast('تم تحديث قائمة الحسابات');
+    await loadAccountsFromFirestore(true);
+    showToast(accountsLoadFailed ? 'تعذّر الاتصال بالخادم — تأكد من الإنترنت' : 'تم تحديث قائمة الحسابات');
     render();
   };
 
