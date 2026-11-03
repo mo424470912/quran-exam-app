@@ -728,6 +728,44 @@ html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
 .mz-seg-ayahs{ display:flex; gap:8px; align-items:flex-end; margin-top:8px; }
 .mz-seg-ayahs label{ flex:1; font-size:12px; font-weight:700; color:var(--ink-soft); display:flex; flex-direction:column; gap:4px; }
 .mz-seg-hint{ font-size:11px; color:var(--ink-soft); margin-top:4px; }
+.tab-btn{ position:relative; }
+.tab-badge{ position:absolute; top:2px; right:50%; margin-right:-20px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:var(--red,#B3392F); color:#fff; font-style:normal; font-size:10.5px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+.sreq-item{ border:1.5px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; background:var(--paper); }
+.sreq-actions{ display:flex; gap:8px; margin-top:8px; }
+.sreq-actions button{ flex:1; padding:8px; border-radius:10px; border:1.5px solid var(--line); background:none; font-family:'Tajawal'; font-weight:800; font-size:13.5px; cursor:pointer; color:var(--ink); }
+.sreq-actions .sreq-ok{ background:var(--green); border-color:var(--green); color:#fff; }
+.sreq-actions .sreq-no{ color:var(--red); border-color:var(--red); }
+.sreq-chip{ font-size:11px; font-weight:800; padding:3px 9px; border-radius:20px; white-space:nowrap; }
+.sreq-chip.pending{ background:rgba(192,138,40,.18); color:#8A5F10; }
+.sreq-chip.rejected{ background:rgba(179,57,47,.15); color:var(--red); }
+.att-datebar{ display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+.att-datebar input[type=date]{ flex:1; padding:10px 12px; border:1.5px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink); font-family:'Tajawal'; font-size:15px; }
+.att-datebar button{ flex:none; width:44px; height:44px; border:1.5px solid var(--line); border-radius:12px; background:var(--paper); color:var(--green); font-size:24px; font-weight:800; cursor:pointer; }
+.att-dayname{ font-size:13px; color:var(--ink-soft); margin:0 2px 10px; font-weight:700; }
+.att-summary{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+.att-chip{ font-size:12px; font-weight:800; padding:4px 10px; border-radius:20px; white-space:nowrap; }
+.att-chip.p{ background:rgba(46,125,91,.16); color:#1E6B49; }
+.att-chip.a{ background:rgba(179,57,47,.14); color:var(--red,#B3392F); }
+.att-chip.e{ background:rgba(192,138,40,.2); color:#8A5F10; }
+.att-chip.u{ background:var(--line); color:var(--ink-soft); }
+.att-tools{ margin-bottom:10px; }
+.att-tools button{ width:100%; padding:10px; border:1.5px dashed var(--green); border-radius:12px; background:none; color:var(--green); font-family:'Tajawal'; font-weight:800; font-size:14px; cursor:pointer; }
+.att-row{ border:1.5px solid var(--line); border-radius:14px; padding:10px 12px; margin-bottom:8px; background:var(--paper); }
+.att-name{ font-weight:800; font-size:15.5px; margin-bottom:8px; }
+.att-btns{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.att-btn{ padding:10px 4px; border:1.5px solid var(--line); border-radius:12px; background:none; font-family:'Tajawal'; font-weight:800; font-size:14px; color:var(--ink-soft); cursor:pointer; transition:all .12s; }
+.att-btn.p.on{ background:#2E7D5B; border-color:#2E7D5B; color:#fff; }
+.att-btn.a.on{ background:#B3392F; border-color:#B3392F; color:#fff; }
+.att-btn.e.on{ background:#C08A28; border-color:#C08A28; color:#fff; }
+.att-note{ width:100%; margin-top:8px; padding:10px 12px; border:1.5px solid var(--line); border-radius:12px; background:var(--paper); color:var(--ink); font-family:'Tajawal'; font-size:14px; }
+.att-wa{ display:flex; align-items:center; justify-content:center; gap:6px; width:100%; margin-top:8px; padding:8px; border:1.5px solid #25D366; border-radius:12px; background:none; color:#1E9E50; font-family:'Tajawal'; font-weight:800; font-size:13px; cursor:pointer; }
+.att-wa svg{ width:18px; height:18px; }
+.att-month{ font-size:11.5px; color:var(--ink-soft); margin-top:6px; }
+.att-trow{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
+.att-trow:last-child{ border-bottom:none; }
+.att-dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin:0 4px 0 2px; }
+.att-dot.p{ background:#2E7D5B; } .att-dot.a{ background:#B3392F; } .att-dot.e{ background:#C08A28; } .att-dot.u{ background:#B9B2A0; }
+.att-legend{ font-size:11.5px; color:var(--ink-soft); margin:4px 0 4px; }
 </style>
 </head>
 <body>
@@ -748,6 +786,9 @@ const STORAGE_MEMORIZATION = 'memorization';
 const STORAGE_IMPORT_BATCHES = 'importBatches';
 const STORAGE_TRASH = 'trash';
 const STORAGE_CENTER_SETTINGS = 'centerSettings';
+const STORAGE_STUDENT_REQUESTS = 'studentRequests';
+const STORAGE_ATT_PREFIX = 'att_';      // one document per month: att_2026-11
+const STORAGE_ATT_INDEX = 'attIndex';   // list of months that have attendance data
 
 /* Dark mode: applied immediately (before first render) so there's no
    flash of the light theme, and remembered per-device via localStorage. */
@@ -1061,7 +1102,8 @@ async function flushPendingSync(){
     try{
       const raw = localStorage.getItem(key);
       if(raw === null){ clearPendingSync(key); return false; } // nothing local to send
-      await withTimeout(firestoreDb.collection('quran_app').doc(key).set({ value: raw }), 8000);
+      const outRaw = await mergeBeforeFlush(key, raw);
+      await withTimeout(firestoreDb.collection('quran_app').doc(key).set({ value: outRaw }), 8000);
       clearPendingSync(key);
       return true;
     }catch(e){
@@ -1093,6 +1135,9 @@ let state = {
   schedule: [], // upcoming exam appointments: {id, studentName, teacherName, date, note, done}
   notifications: [], // {id, message, teacherName (null = all teachers), from, createdAt, readBy: [usernames]}
   memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo (computed from surah/ayah), surah, ayahFrom, surahTo, ayahTo, pagesAmount (quarter pages), quality, note, date, recordedBy}
+  attendance: {}, // 'YYYY-MM' -> [{n:studentName,t:teacher,d:'YYYY-MM-DD',s:'p'|'a'|'e'|'x',o:note,u:updatedAt,b:recordedBy}]
+  attIndex: [],
+  studentRequests: [], // {id,type:'new'|'transfer',studentName,nationalId,birthDate,phone,teacherName,fromTeacher,requestedBy,requestedAt,updatedAt,status:'pending'|'approved'|'rejected'|'deleted',decidedBy,decidedAt,rejectReason}
   trash: [], // {id, type:'exam'|'student'|'exams-bulk', data, label, deletedAt, deletedBy} — kept 30 days
   importBatches: [], // {id, source:'students-excel', date, importedBy, teacherName, entries:[{studentId, wasNew, prevSnapshot|null}]}
   centerSettings: null, // {name, fullName, tagline, directorName, logoDataUri} — null until loaded; getCenterSettings() below fills in defaults
@@ -1130,7 +1175,7 @@ async function loadAppData(){
   // to a multi-minute wait before the app could show anything. Fetched
   // in parallel, the whole batch takes only as long as the single
   // slowest one.
-  const [ex, st, sc, nt, mz, ib, cs, tr] = await Promise.all([
+  const [ex, st, sc, nt, mz, ib, cs, tr, sq] = await Promise.all([
     storageAdapter.get(STORAGE_EXAMS).catch(()=>null),
     storageAdapter.get(STORAGE_STUDENTS).catch(()=>null),
     storageAdapter.get(STORAGE_SCHEDULE).catch(()=>null),
@@ -1139,6 +1184,7 @@ async function loadAppData(){
     storageAdapter.get(STORAGE_IMPORT_BATCHES).catch(()=>null),
     storageAdapter.get(STORAGE_CENTER_SETTINGS).catch(()=>null),
     storageAdapter.get(STORAGE_TRASH).catch(()=>null),
+    storageAdapter.get(STORAGE_STUDENT_REQUESTS).catch(()=>null),
   ]);
   try{ state.exams = ex ? JSON.parse(ex.value) : []; }catch(e){ state.exams = []; }
   try{ state.students = st ? JSON.parse(st.value) : []; }catch(e){ state.students = []; }
@@ -1169,6 +1215,10 @@ async function loadAppData(){
   try{ state.trash = tr ? JSON.parse(tr.value) : []; }catch(e){ state.trash = []; }
   if(!Array.isArray(state.trash)) state.trash = [];
   purgeOldTrash();
+  try{ state.studentRequests = sq ? JSON.parse(sq.value) : []; }catch(e){ state.studentRequests = []; }
+  if(!Array.isArray(state.studentRequests)) state.studentRequests = [];
+  sreqPurge();
+  await loadAttendanceInitial();
 
   if (firebaseAuth && firestoreDb){
     await loadAccountsFromFirestore();
@@ -1231,6 +1281,7 @@ async function syncFromServer(manual){
       [STORAGE_EXAMS,'exams'], [STORAGE_STUDENTS,'students'], [STORAGE_SCHEDULE,'schedule'],
       [STORAGE_NOTIFICATIONS,'notifications'], [STORAGE_MEMORIZATION,'memorization'],
       [STORAGE_IMPORT_BATCHES,'importBatches'], [STORAGE_CENTER_SETTINGS,'centerSettings'], [STORAGE_TRASH,'trash'],
+      [STORAGE_STUDENT_REQUESTS,'studentRequests'],
     ];
     await Promise.all(keys.map(async ([key, prop])=>{
       if(pend.has(key)) return;
@@ -1238,9 +1289,22 @@ async function syncFromServer(manual){
       try{ doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 12000); }
       catch(e){ return; }
       if(!doc.exists) return;
-      if((lastLocalWrite[key]||0) >= started) return;      // saved here meanwhile — ours is newer
       if(getPendingSyncKeys().includes(key)) return;
       const val = doc.data().value;
+      if(key === STORAGE_STUDENT_REQUESTS){
+        // Approval requests are merged item-by-item (newest edit wins) so two people
+        // sending/deciding at the same time never erase each other's requests.
+        let srv; try{ srv = JSON.parse(val); }catch(e){ return; }
+        if(!Array.isArray(srv)) return;
+        const merged = sreqMerge(state.studentRequests, srv);
+        if(JSON.stringify(merged) !== JSON.stringify(state.studentRequests)){
+          state.studentRequests = merged;
+          try{ localStorage.setItem(key, JSON.stringify(merged)); }catch(e){}
+          changed = true;
+        }
+        return;
+      }
+      if((lastLocalWrite[key]||0) >= started) return;      // saved here meanwhile — ours is newer
       let cur = null; try{ cur = localStorage.getItem(key); }catch(e){}
       if(cur === val) return;
       let parsed; try{ parsed = JSON.parse(val); }catch(e){ return; }
@@ -1250,6 +1314,21 @@ async function syncFromServer(manual){
       try{ localStorage.setItem(key, val); }catch(e){}
       changed = true;
     }));
+    for(const m of Object.keys(state.attendance)){
+      const key = STORAGE_ATT_PREFIX + m;
+      if(pend.has(key) || getPendingSyncKeys().includes(key)) continue;
+      let doc;
+      try{ doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 10000); }catch(e){ continue; }
+      if(!doc.exists) continue;
+      let srv; try{ srv = JSON.parse(doc.data().value); }catch(e){ continue; }
+      if(!Array.isArray(srv)) continue;
+      const merged = attMerge(state.attendance[m], srv);
+      if(JSON.stringify(merged) !== JSON.stringify(state.attendance[m])){
+        state.attendance[m] = merged;
+        try{ localStorage.setItem(key, JSON.stringify(merged)); }catch(e){}
+        changed = true;
+      }
+    }
     if(changed){ applyCenterOverrides(); purgeOldTrash(); }
     if(firebaseAuth){
       const before = JSON.stringify(state.accounts.map(a=>[a.uid,a.username,a.role,a.disabled,a.teacherLink,a.email]));
@@ -1368,8 +1447,9 @@ function downloadBlob(content, filename, mime){
   URL.revokeObjectURL(url);
 }
 
-function exportDataJSON(){
-  const payload = { app: 'quran-exam-center', version: 2, exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization, trash: state.trash || [], centerSettings: state.centerSettings || {} };
+async function exportDataJSON(){
+  try{ await attLoadAll(); }catch(e){}
+  const payload = { attendance: state.attendance || {}, app: 'quran-exam-center', version: 2, exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization, trash: state.trash || [], studentRequests: state.studentRequests || [], centerSettings: state.centerSettings || {} };
   downloadBlob(JSON.stringify(payload, null, 2), `نسخة-احتياطية-${todayStamp()}.json`, 'application/json');
   if(state.currentRole==='admin'){
     state.centerSettings = { ...(state.centerSettings||{}), lastBackupExportAt: new Date().toISOString() };
@@ -1534,9 +1614,13 @@ async function restoreFullFromFile(file){
     state.schedule = Array.isArray(data.schedule) ? data.schedule : [];
     state.memorization = Array.isArray(data.memorization) ? data.memorization : [];
     if(Array.isArray(data.trash)) state.trash = data.trash;
+    if(Array.isArray(data.studentRequests)) state.studentRequests = data.studentRequests;
+    if(data.attendance && typeof data.attendance==='object'){
+      for(const m of Object.keys(data.attendance)){ if(Array.isArray(data.attendance[m])){ state.attendance[m] = data.attendance[m]; await attSaveMonth(m); } }
+    }
     if(data.centerSettings && typeof data.centerSettings==='object') state.centerSettings = data.centerSettings;
     purgeOldTrash(); applyCenterOverrides();
-    await saveExams(); await saveStudents(); await saveSchedule(); await saveMemorization(); await saveTrash(); await saveCenterSettings();
+    await saveExams(); await saveStudents(); await saveSchedule(); await saveMemorization(); await saveTrash(); await saveCenterSettings(); await saveStudentRequests();
     showToast('تمت الاستعادة الكاملة');
     render();
   }catch(e){
@@ -1611,6 +1695,412 @@ function purgeOldTrash(){
   const cut = Date.now() - TRASH_DAYS*86400000;
   state.trash = (state.trash||[]).filter(t => new Date(t.deletedAt).getTime() >= cut);
 }
+/* ---------------- Student approval requests ----------------
+   A teacher can't add a student straight to the center's records: the
+   teacher sends a request, and the admin accepts or rejects it. Requests
+   live in their own list and are merged item-by-item (newest edit wins),
+   so simultaneous changes from several phones never erase each other. */
+function sreqKey(n){ return String(n||'').trim().toLowerCase(); }
+function sreqMerge(a, b){
+  const m = new Map();
+  [...(a||[]), ...(b||[])].forEach(r=>{
+    const c = m.get(r.id);
+    if(!c || String(r.updatedAt||'') > String(c.updatedAt||'')) m.set(r.id, r);
+  });
+  return [...m.values()];
+}
+function sreqPurge(){
+  const cut = Date.now() - 30*86400000;
+  state.studentRequests = (state.studentRequests||[]).filter(r=>
+    r.status==='pending' || new Date(r.updatedAt || r.requestedAt || 0).getTime() >= cut);
+}
+async function saveStudentRequests(){
+  if(firestoreDb && navigator.onLine){
+    try{
+      const doc = await withTimeout(firestoreDb.collection('quran_app').doc(STORAGE_STUDENT_REQUESTS).get({ source:'server' }), 4000);
+      if(doc.exists){
+        const srv = JSON.parse(doc.data().value);
+        if(Array.isArray(srv)) state.studentRequests = sreqMerge(state.studentRequests, srv);
+      }
+    }catch(e){}
+  }
+  sreqPurge();
+  await storageAdapter.set(STORAGE_STUDENT_REQUESTS, JSON.stringify(state.studentRequests));
+}
+function pendingStudentRequests(){ return (state.studentRequests||[]).filter(r=>r.status==='pending').sort((a,b)=> new Date(a.requestedAt)-new Date(b.requestedAt)); }
+function pendingRequestFor(name){ const k = sreqKey(name); return pendingStudentRequests().find(r=>sreqKey(r.studentName)===k) || null; }
+function studentKnownToCenter(name){
+  const k = sreqKey(name); if(!k) return false;
+  return state.students.some(x=>sreqKey(x.name)===k)
+    || state.exams.some(x=>sreqKey(x.studentName)===k)
+    || state.memorization.some(x=>sreqKey(x.studentName)===k)
+    || state.schedule.some(x=>sreqKey(x.studentName)===k);
+}
+/* Teachers can only book / log memorization for students the admin has
+   accepted (or that already exist in the center's records). */
+function teacherStudentGate(name){
+  if(state.currentRole !== 'teacher') return null;
+  if(pendingRequestFor(name)) return 'طلب اعتماد هذا الطالب لسا بانتظار موافقة المدير — بتقدر تسجّل له بعد القبول.';
+  if(!studentKnownToCenter(name)) return 'هذا الطالب غير مسجّل بالمركز. أضفه من "بيانات الطلاب" وانتظر موافقة المدير.';
+  return null;
+}
+function submitStudentRequest({ name, nationalId, birthDate, phone }){
+  const existing = state.students.find(x=>sreqKey(x.name)===sreqKey(name));
+  const now = new Date().toISOString();
+  const r = {
+    id: 'sr_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    type: existing ? 'transfer' : 'new',
+    studentName: name, nationalId: nationalId||'', birthDate: birthDate||null, phone: phone||'',
+    teacherName: state.currentTeacherLink,
+    fromTeacher: existing ? (getStudentTeacherName(existing) || null) : null,
+    requestedBy: state.currentUser, requestedAt: now, updatedAt: now, status: 'pending',
+  };
+  state.studentRequests.push(r);
+  return r;
+}
+function sreqNotifyTeacher(teacherName, message){
+  state.notifications.unshift({ id:'nt_'+Date.now()+'_'+Math.random().toString(36).slice(2,5), message, teacherName, from: state.currentUser, createdAt: new Date().toISOString(), readBy: [] });
+}
+async function approveStudentRequest(id, silent){
+  const r = (state.studentRequests||[]).find(x=>x.id===id);
+  if(!r || r.status!=='pending') return false;
+  let st = state.students.find(x=>sreqKey(x.name)===sreqKey(r.studentName));
+  if(!st){
+    st = { id: makeStudentId(), name: r.studentName, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
+    state.students.push(st);
+  }
+  st.registeredByTeacher = r.teacherName;
+  if(r.nationalId) st.nationalId = r.nationalId;
+  if(r.birthDate) st.birthDate = r.birthDate;
+  if(r.phone) st.phone = r.phone;
+  const now = new Date().toISOString();
+  r.status = 'approved'; r.decidedBy = state.currentUser; r.decidedAt = now; r.updatedAt = now;
+  sreqNotifyTeacher(r.teacherName, `✅ تم اعتماد الطالب «${r.studentName}» وصار ضمن طلابك.`);
+  if(!silent){ await saveStudents(); await saveNotifications(); await saveStudentRequests(); }
+  return true;
+}
+async function rejectStudentRequest(id, reason){
+  const r = (state.studentRequests||[]).find(x=>x.id===id);
+  if(!r || r.status!=='pending') return false;
+  const now = new Date().toISOString();
+  r.status = 'rejected'; r.decidedBy = state.currentUser; r.decidedAt = now; r.updatedAt = now; r.rejectReason = reason || '';
+  sreqNotifyTeacher(r.teacherName, `❌ تم رفض طلب اعتماد الطالب «${r.studentName}»${reason ? ' — السبب: ' + reason : ''}.`);
+  await saveNotifications(); await saveStudentRequests();
+  return true;
+}
+function sreqTypeLabel(r){
+  return r.type==='transfer' ? `طالب موجود${r.fromTeacher ? ' عند ' + r.fromTeacher : ''} — ضمّه لطلابه` : 'طالب جديد';
+}
+function adminRequestsCardHTML(){
+  if(state.currentRole !== 'admin') return '';
+  const list = pendingStudentRequests();
+  if(!list.length) return '';
+  return `
+  <div class="settings-block" style="border-color:var(--gold,#C08A28);">
+    <h3>طلبات اعتماد الطلاب <span class="acc-meta" style="background:var(--gold,#C08A28);color:#fff;">${list.length}</span></h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">المحفّظون بيرسلوا طلاب جدد هون، والطالب ما بينضاف لسجلاتهم إلا إذا قبلت.</p>
+    ${list.map(r=>`
+    <div class="sreq-item">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
+        <div>
+          <div style="font-weight:800; font-size:15px;">${escapeHtml(r.studentName)}</div>
+          <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">المحفّظ: <b>${escapeHtml(r.teacherName||'—')}</b> · ${escapeHtml(sreqTypeLabel(r))}</div>
+          <div style="font-size:11.5px; color:var(--ink-soft); margin-top:2px;">${[r.nationalId?'هوية: '+escapeHtml(r.nationalId):'', r.birthDate?'ميلاد: '+escapeHtml(r.birthDate):'', r.phone?'جوال: '+escapeHtml(r.phone):''].filter(Boolean).join(' · ') || 'بدون بيانات إضافية'}</div>
+        </div>
+        <span style="font-size:11px; color:var(--ink-soft); white-space:nowrap;">${new Date(r.requestedAt).toLocaleDateString('ar-EG',{month:'short',day:'numeric'})}</span>
+      </div>
+      <div class="sreq-actions">
+        <button class="sreq-ok" data-id="${r.id}">قبول</button>
+        <button class="sreq-no" data-id="${r.id}">رفض</button>
+      </div>
+    </div>`).join('')}
+    ${list.length>1 ? `<button class="btn btn-primary" id="sreq-ok-all" style="margin-top:8px;">قبول الكل (${list.length})</button>` : ''}
+  </div>`;
+}
+function teacherRequestsCardHTML(){
+  const mine = (state.studentRequests||[]).filter(r=>r.teacherName===state.currentTeacherLink && (r.status==='pending' || r.status==='rejected'))
+    .sort((a,b)=> new Date(b.requestedAt)-new Date(a.requestedAt));
+  if(!mine.length) return '';
+  return `
+  <div class="settings-block">
+    <h3>طلبات الاعتماد <span class="acc-meta">${mine.length}</span></h3>
+    ${mine.map(r=>`
+    <div class="sreq-item">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div>
+          <div style="font-weight:800;">${escapeHtml(r.studentName)}</div>
+          ${r.status==='rejected' && r.rejectReason ? `<div style="font-size:12px; color:var(--red); margin-top:2px;">سبب الرفض: ${escapeHtml(r.rejectReason)}</div>` : ''}
+        </div>
+        <span class="sreq-chip ${r.status}">${r.status==='pending' ? 'بانتظار الاعتماد' : 'مرفوض'}</span>
+      </div>
+      <div class="sreq-actions"><button class="sreq-del" data-id="${r.id}">${r.status==='pending' ? 'إلغاء الطلب' : 'حذف'}</button></div>
+    </div>`).join('')}
+  </div>`;
+}
+function attachRequestHandlers(){
+  const rerender = ()=>{ render(); };
+  document.querySelectorAll('.sreq-ok').forEach(b=> b.onclick = async ()=>{ b.disabled = true; await approveStudentRequest(b.dataset.id); showToast('تم قبول الطالب'); rerender(); });
+  document.querySelectorAll('.sreq-no').forEach(b=> b.onclick = async ()=>{
+    const reason = prompt('سبب الرفض (اختياري — بيوصل للمحفّظ):');
+    if(reason === null) return;
+    b.disabled = true;
+    await rejectStudentRequest(b.dataset.id, reason.trim());
+    showToast('تم رفض الطلب'); rerender();
+  });
+  const all = document.getElementById('sreq-ok-all');
+  if(all) all.onclick = async ()=>{
+    const ids = pendingStudentRequests().map(r=>r.id);
+    if(!confirm(`قبول ${ids.length} طالب دفعة وحدة؟`)) return;
+    all.disabled = true;
+    for(const id of ids) await approveStudentRequest(id, true);
+    await saveStudents(); await saveNotifications(); await saveStudentRequests();
+    showToast('تم قبول كل الطلبات'); rerender();
+  };
+  document.querySelectorAll('.sreq-del').forEach(b=> b.onclick = async ()=>{
+    const r = state.studentRequests.find(x=>x.id===b.dataset.id); if(!r) return;
+    r.status = 'deleted'; r.updatedAt = new Date().toISOString();
+    await saveStudentRequests(); showToast('تم'); rerender();
+  });
+}
+
+/* ---------------- Attendance (حضور / غياب / مأذون) ----------------
+   One record per student per day, stored in one document per month
+   (att_YYYY-MM) so a document never grows too large. Records merge
+   item-by-item (newest edit wins) so several teachers — or the same
+   teacher on two phones — never overwrite each other. */
+const ATT_LABEL = { p:'حاضر', a:'غائب', e:'مأذون' };
+function localDateStamp(d){ d = d || new Date(); const z = n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
+function attRecKey(r){ return r.d + '|' + sreqKey(r.n); }
+function attMerge(a, b){
+  const m = new Map();
+  [...(a||[]), ...(b||[])].forEach(r=>{
+    const k = attRecKey(r), c = m.get(k);
+    if(!c || String(r.u||'') > String(c.u||'')) m.set(k, r);
+  });
+  return [...m.values()];
+}
+async function attLoadMonth(m){
+  if(state.attendance[m]) return;
+  let arr = [];
+  try{
+    const r = await storageAdapter.get(STORAGE_ATT_PREFIX + m);
+    if(r){ const v = JSON.parse(r.value); if(Array.isArray(v)) arr = v; }
+  }catch(e){}
+  state.attendance[m] = arr;
+}
+async function loadAttendanceInitial(){
+  try{
+    const ix = await storageAdapter.get(STORAGE_ATT_INDEX);
+    state.attIndex = ix ? JSON.parse(ix.value) : [];
+  }catch(e){ state.attIndex = []; }
+  if(!Array.isArray(state.attIndex)) state.attIndex = [];
+  const d = new Date(); const cur = localDateStamp(d).slice(0,7);
+  d.setDate(1); d.setMonth(d.getMonth()-1); const prev = localDateStamp(d).slice(0,7);
+  await Promise.all([attLoadMonth(cur), attLoadMonth(prev)]);
+}
+async function attLoadAll(){
+  await Promise.all((state.attIndex||[]).map(m=>attLoadMonth(m)));
+}
+async function attSaveMonth(m, noMerge){
+  if(!noMerge && firestoreDb && navigator.onLine){
+    try{
+      const doc = await withTimeout(firestoreDb.collection('quran_app').doc(STORAGE_ATT_PREFIX + m).get({ source:'server' }), 4000);
+      if(doc.exists){ const srv = JSON.parse(doc.data().value); if(Array.isArray(srv)) state.attendance[m] = attMerge(state.attendance[m], srv); }
+    }catch(e){}
+  }
+  await storageAdapter.set(STORAGE_ATT_PREFIX + m, JSON.stringify(state.attendance[m] || []));
+  if(!state.attIndex.includes(m)){
+    state.attIndex.push(m); state.attIndex.sort();
+    await storageAdapter.set(STORAGE_ATT_INDEX, JSON.stringify(state.attIndex));
+  }
+}
+/* Before a queued (offline) write goes out, merge it with what the server
+   has now, so reconnecting never wipes records other people added. */
+async function mergeBeforeFlush(key, raw){
+  const isAtt = key.startsWith(STORAGE_ATT_PREFIX), isReq = key === STORAGE_STUDENT_REQUESTS, isIx = key === STORAGE_ATT_INDEX;
+  if(!(isAtt || isReq || isIx)) return raw;
+  try{
+    const doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 5000);
+    if(!doc.exists) return raw;
+    const srv = JSON.parse(doc.data().value), loc = JSON.parse(raw);
+    if(!Array.isArray(srv) || !Array.isArray(loc)) return raw;
+    let merged;
+    if(isAtt){ merged = attMerge(loc, srv); state.attendance[key.slice(STORAGE_ATT_PREFIX.length)] = merged; }
+    else if(isReq){ merged = sreqMerge(loc, srv); state.studentRequests = merged; }
+    else { merged = [...new Set([...loc, ...srv])].sort(); state.attIndex = merged; }
+    const out = JSON.stringify(merged);
+    try{ localStorage.setItem(key, out); }catch(e){}
+    return out;
+  }catch(e){ return raw; }
+}
+const attQueue = new Set(); let attTimer = null;
+function attQueueSave(m){
+  attQueue.add(m);
+  clearTimeout(attTimer);
+  attTimer = setTimeout(async ()=>{
+    const ms = [...attQueue]; attQueue.clear();
+    for(const x of ms) await attSaveMonth(x);
+  }, 600);
+}
+function attGet(name, date){
+  const arr = state.attendance[date.slice(0,7)] || [];
+  const k = date + '|' + sreqKey(name);
+  const r = arr.find(x=>attRecKey(x)===k);
+  return r && r.s !== 'x' ? r : null;
+}
+async function attMark(name, teacher, date, st, note){
+  const m = date.slice(0,7);
+  await attLoadMonth(m);
+  const arr = state.attendance[m];
+  const k = date + '|' + sreqKey(name);
+  const i = arr.findIndex(x=>attRecKey(x)===k);
+  const rec = { n:name, t:teacher || '', d:date, s:st, o:note||'', u:new Date().toISOString(), b:state.currentUser || '' };
+  if(i>=0) arr[i] = rec; else arr.push(rec);
+  attQueueSave(m);
+}
+function attMonthStats(name, month){
+  const arr = state.attendance[month] || [];
+  const k = sreqKey(name); let a=0, e=0, p=0;
+  arr.forEach(r=>{ if(sreqKey(r.n)!==k) return; if(r.s==='a') a++; else if(r.s==='e') e++; else if(r.s==='p') p++; });
+  return { a, e, p };
+}
+function iconAttendance(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/><path d="M9 15.5l2 2 4-4"/></svg>`; }
+
+let attDate = null, attSearch = '', attAdminDate = null;
+function attDayName(date){ return new Date(date + 'T12:00:00').toLocaleDateString('ar-EG', { weekday:'long', day:'numeric', month:'long', year:'numeric' }); }
+function attTeacherStudents(){
+  const set = getTeacherStudentNames(state.currentTeacherLink);
+  return state.students.filter(x=>set.has(sreqKey(x.name))).sort((a,b)=> a.name.localeCompare(b.name, 'ar'));
+}
+function attSummaryHTML(list){
+  let p=0,a=0,e=0,u=0;
+  list.forEach(st=>{ const r = attGet(st.name, attDate); if(!r) u++; else if(r.s==='p') p++; else if(r.s==='a') a++; else if(r.s==='e') e++; });
+  return `<div class="att-summary">
+    <span class="att-chip p">حاضر ${p}</span><span class="att-chip a">غائب ${a}</span><span class="att-chip e">مأذون ${e}</span><span class="att-chip u">لم يُسجَّل ${u}</span></div>`;
+}
+function attRowHTML(st){
+  const r = attGet(st.name, attDate);
+  const stat = attMonthStats(st.name, attDate.slice(0,7));
+  const extra = (stat.a || stat.e) ? `<div class="att-month">هذا الشهر: غياب ${stat.a} · إذن ${stat.e}</div>` : '';
+  const btn = (code, lbl)=>`<button type="button" class="att-btn ${code} ${r && r.s===code ? 'on' : ''}" data-st="${code}" data-name="${escapeHtml(st.name)}">${lbl}</button>`;
+  return `<div class="att-row" data-name="${escapeHtml(st.name)}">
+    <div class="att-name">${escapeHtml(st.name)}</div>
+    <div class="att-btns">${btn('p','حاضر')}${btn('a','غائب')}${btn('e','مأذون')}</div>
+    ${r && r.s==='e' ? `<input type="text" class="att-note plain-input" data-name="${escapeHtml(st.name)}" placeholder="سبب الإذن (اختياري)" value="${escapeHtml(r.o||'')}">` : ''}
+    ${r && r.s==='a' && st.phone ? `<button type="button" class="att-wa" data-name="${escapeHtml(st.name)}">${iconWhatsappSvg()} إبلاغ ولي الأمر</button>` : ''}
+    ${extra}
+  </div>`;
+}
+function attListHTML(){
+  const q = attSearch.trim().toLowerCase();
+  const list = attTeacherStudents().filter(x=>!q || x.name.toLowerCase().includes(q));
+  if(!attTeacherStudents().length) return `<div class="empty-state">ما في طلاب مسجّلين إلك بعد — أضف طلابك من "بيانات الطلاب".</div>`;
+  return list.length ? list.map(attRowHTML).join('') : `<div class="empty-state">ما في نتائج مطابقة</div>`;
+}
+function attendanceView(){
+  if(!attDate) attDate = localDateStamp();
+  const all = attTeacherStudents();
+  return `
+  <div class="section-title">الحضور والغياب</div>
+  <div class="att-datebar">
+    <button type="button" id="att-prev" aria-label="اليوم السابق">›</button>
+    <input type="date" id="att-date" value="${attDate}" max="${localDateStamp()}">
+    <button type="button" id="att-next" aria-label="اليوم التالي">‹</button>
+  </div>
+  <div class="att-dayname" id="att-dayname">${attDayName(attDate)}</div>
+  <div id="att-summary-wrap">${attSummaryHTML(all)}</div>
+  <div class="att-tools"><button type="button" id="att-all-present">تحديد الكل حاضر</button></div>
+  <div class="search-box"><input type="text" id="att-search" placeholder="ابحث عن طالب..." value="${escapeHtml(attSearch)}"></div>
+  <div id="att-list">${attListHTML()}</div>`;
+}
+function attRefresh(){
+  const l = document.getElementById('att-list'); if(l) l.innerHTML = attListHTML();
+  const sm = document.getElementById('att-summary-wrap'); if(sm) sm.innerHTML = attSummaryHTML(attTeacherStudents());
+  const dn = document.getElementById('att-dayname'); if(dn) dn.textContent = attDayName(attDate);
+}
+function attendanceAbsenceMessage(name, date){
+  return `${getCenterSettings().fullName}\nالسلام عليكم ورحمة الله وبركاته،\nنفيدكم بأن الطالب ${name} تغيّب عن المركز بتاريخ ${attDayName(date)}.\nنرجو التكرّم بإبلاغنا بسبب الغياب. شاكرين تعاونكم.`;
+}
+function attachAttendanceHandlers(){
+  const dateEl = document.getElementById('att-date');
+  const setDate = async (v)=>{
+    if(!v) return;
+    if(v > localDateStamp()) v = localDateStamp();
+    attDate = v; if(dateEl) dateEl.value = v;
+    await attLoadMonth(v.slice(0,7)); attRefresh();
+  };
+  if(dateEl) dateEl.onchange = ()=> setDate(dateEl.value);
+  const shift = n=>{ const d = new Date(attDate + 'T12:00:00'); d.setDate(d.getDate()+n); setDate(localDateStamp(d)); };
+  const prev = document.getElementById('att-prev'); if(prev) prev.onclick = ()=> shift(-1);
+  const next = document.getElementById('att-next'); if(next) next.onclick = ()=> shift(1);
+  const search = document.getElementById('att-search');
+  if(search) search.oninput = ()=>{ attSearch = search.value; const l = document.getElementById('att-list'); if(l) l.innerHTML = attListHTML(); };
+  const allBtn = document.getElementById('att-all-present');
+  if(allBtn) allBtn.onclick = async ()=>{
+    const list = attTeacherStudents().filter(st=>!attGet(st.name, attDate));
+    if(!list.length){ showToast('كل الطلاب مسجّلين'); return; }
+    for(const st of list) await attMark(st.name, state.currentTeacherLink, attDate, 'p');
+    attRefresh(); showToast(`تم تسجيل ${list.length} طالب حاضر`);
+  };
+  const listEl = document.getElementById('att-list');
+  if(listEl){
+    listEl.onclick = async (ev)=>{
+      const b = ev.target.closest('.att-btn');
+      if(b){
+        const name = b.dataset.name, st = b.dataset.st;
+        const cur = attGet(name, attDate);
+        await attMark(name, state.currentTeacherLink, attDate, cur && cur.s===st ? 'x' : st, cur && cur.s===st ? '' : (st==='e' && cur ? cur.o : ''));
+        attRefresh(); return;
+      }
+      const wa = ev.target.closest('.att-wa');
+      if(wa){
+        const student = state.students.find(x=>sreqKey(x.name)===sreqKey(wa.dataset.name));
+        if(!student || !student.phone) return;
+        const phoneDigits = student.phone.replace(/[^\d+]/g, '').replace(/^0+/, '');
+        window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(attendanceAbsenceMessage(student.name, attDate))}`, '_blank');
+      }
+    };
+    listEl.onchange = async (ev)=>{
+      const n = ev.target.closest('.att-note');
+      if(!n) return;
+      const cur = attGet(n.dataset.name, attDate);
+      if(cur && cur.s==='e') await attMark(cur.n, cur.t, attDate, 'e', n.value.trim());
+    };
+  }
+}
+function attendanceAdminCardHTML(){
+  if(state.currentRole !== 'admin') return '';
+  if(!attAdminDate) attAdminDate = localDateStamp();
+  const date = attAdminDate, month = date.slice(0,7);
+  const arr = (state.attendance[month] || []).filter(r=>r.d===date && r.s!=='x');
+  const teachers = [...new Set(state.students.map(x=>x.registeredByTeacher).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar'));
+  const rows = teachers.map(t=>{
+    const sts = state.students.filter(x=>x.registeredByTeacher===t);
+    let p=0,a=0,e=0,u=0;
+    sts.forEach(st=>{ const r = attGet(st.name, date); if(!r) u++; else if(r.s==='p') p++; else if(r.s==='a') a++; else e++; });
+    return `<div class="att-trow"><b>${escapeHtml(t)}</b><span><i class="att-dot p"></i>${p} <i class="att-dot a"></i>${a} <i class="att-dot e"></i>${e} <i class="att-dot u"></i>${u}</span></div>`;
+  }).join('');
+  const absent = arr.filter(r=>r.s==='a' || r.s==='e').sort((x,y)=> x.s.localeCompare(y.s) || x.n.localeCompare(y.n,'ar'));
+  const tally = {};
+  (state.attendance[month]||[]).forEach(r=>{ if(r.s==='a') tally[r.n] = (tally[r.n]||0)+1; });
+  const top = Object.entries(tally).sort((x,y)=>y[1]-x[1]).slice(0,5);
+  return `
+  <div class="settings-block">
+    <h3>الحضور والغياب</h3>
+    <div class="att-datebar" style="margin-bottom:6px;"><input type="date" id="att-admin-date" value="${date}" max="${localDateStamp()}"></div>
+    <div class="att-dayname">${attDayName(date)}</div>
+    ${rows ? `<div class="att-legend"><i class="att-dot p"></i>حاضر <i class="att-dot a"></i>غائب <i class="att-dot e"></i>مأذون <i class="att-dot u"></i>لم يُسجَّل</div>${rows}` : `<p style="font-size:12px;color:var(--ink-soft);">ما في طلاب مسجّلين لمحفّظين بعد.</p>`}
+    ${absent.length ? `<div style="font-size:12px;font-weight:800;margin:12px 0 6px;">الغائبون والمأذونون اليوم</div>
+      ${absent.map(r=>`<div class="att-trow"><span><b>${escapeHtml(r.n)}</b> <span style="color:var(--ink-soft);font-size:11.5px;">(${escapeHtml(r.t||'')})</span>${r.s==='e' && r.o ? `<br><span style="font-size:11.5px;color:var(--ink-soft);">${escapeHtml(r.o)}</span>` : ''}</span><span class="att-chip ${r.s}">${ATT_LABEL[r.s]}</span></div>`).join('')}` : ''}
+    ${top.length ? `<div style="font-size:12px;font-weight:800;margin:12px 0 6px;">الأكثر غياباً هذا الشهر</div>
+      ${top.map(([n,c])=>`<div class="att-trow"><b>${escapeHtml(n)}</b><span class="att-chip a">${c} ${c===1?'يوم':'أيام'}</span></div>`).join('')}` : ''}
+  </div>`;
+}
+function attachAdminAttendanceHandlers(){
+  const d = document.getElementById('att-admin-date');
+  if(d) d.onchange = async ()=>{ if(!d.value) return; attAdminDate = d.value > localDateStamp() ? localDateStamp() : d.value; await attLoadMonth(attAdminDate.slice(0,7)); render(); };
+}
+
 async function saveTrash(){
   await storageAdapter.set(STORAGE_TRASH, JSON.stringify(state.trash || []));
 }
@@ -2482,7 +2972,7 @@ function iconWhatsappSvg(){ return `<svg viewBox="0 0 24 24" fill="currentColor"
 
 function effectiveView(){
   const isTeacherRole = state.currentRole === 'teacher';
-  return isTeacherRole && !['schedule','history','memorization','myStudents','settings'].includes(state.view) ? 'schedule' : state.view;
+  return isTeacherRole && !['schedule','history','memorization','myStudents','attendance','settings'].includes(state.view) ? 'schedule' : state.view;
 }
 
 function syncStatusBadge(){
@@ -2519,6 +3009,7 @@ function mainScreen(){
     : currentView==='schedule' ? teacherBookingView
     : currentView==='memorization' ? memorizationView
     : currentView==='myStudents' ? myStudentsView
+    : currentView==='attendance' ? attendanceView
     : settingsView;
   return `
   <div class="topbar">
@@ -2536,12 +3027,13 @@ function mainScreen(){
   <div class="tabbar">
     ${isTeacherRole ? `
     <button class="tab-btn ${currentView==='schedule'?'active':''}" data-view="schedule">${iconTest()}<span>حجز اختبار</span></button>
-    <button class="tab-btn ${currentView==='myStudents'?'active':''}" data-view="myStudents">${iconStudents()}<span>بيانات الطلاب</span></button>
+    <button class="tab-btn ${currentView==='myStudents'?'active':''}" data-view="myStudents">${iconStudents()}<span>طلابي</span></button>
+    <button class="tab-btn ${currentView==='attendance'?'active':''}" data-view="attendance">${iconAttendance()}<span>الحضور</span></button>
     <button class="tab-btn ${currentView==='memorization'?'active':''}" data-view="memorization">${iconBook()}<span>التحفيظ</span></button>
     <button class="tab-btn ${currentView==='history'?'active':''}" data-view="history">${iconHistory()}<span>نتائج طلابي</span></button>
     <button class="tab-btn ${currentView==='settings'?'active':''}" data-view="settings">${iconSettings()}<span>الإعدادات</span></button>
     ` : `
-    <button class="tab-btn ${state.view==='dashboard'?'active':''} ${examLocked?'tab-locked':''}" data-view="dashboard">${iconDashboard()}<span>الرئيسية</span></button>
+    <button class="tab-btn ${state.view==='dashboard'?'active':''} ${examLocked?'tab-locked':''}" data-view="dashboard">${iconDashboard()}<span>الرئيسية</span>${state.currentRole==='admin' && pendingStudentRequests().length ? `<i class="tab-badge">${pendingStudentRequests().length}</i>` : ''}</button>
     <button class="tab-btn ${state.view==='test'?'active':''}" data-view="test">${iconTest()}<span>الاختبار</span></button>
     <button class="tab-btn ${state.view==='history'?'active':''} ${examLocked?'tab-locked':''}" data-view="history">${iconHistory()}<span>السجل</span></button>
     <button class="tab-btn ${state.view==='students'?'active':''} ${examLocked?'tab-locked':''}" data-view="students">${iconStudents()}<span>الطلاب</span></button>
@@ -2597,6 +3089,7 @@ function attachMainHandlers(){
   if(currentView==='schedule') attachScheduleHandlers();
   if(currentView==='memorization') attachMemorizationHandlers();
   if(currentView==='myStudents') attachMyStudentsHandlers();
+  if(currentView==='attendance') attachAttendanceHandlers();
   if(currentView==='settings') attachSettingsHandlers();
 }
 
@@ -4959,6 +5452,7 @@ function dashboardView(){
 
   return `
   <div class="section-title">نظرة عامة</div>
+  ${adminRequestsCardHTML()}
 
   <div class="stat-row">
     <div class="stat-card"><div class="stat-icon">${iconTest()}</div><div class="num">${todayExamsCount}</div><div class="lbl">اختبارات اليوم</div></div>
@@ -4997,6 +5491,7 @@ function dashboardView(){
 }
 
 function attachDashboardHandlers(){
+  attachRequestHandlers();
   const scheduleBtn = document.getElementById('btn-dash-view-schedule');
   if(scheduleBtn) scheduleBtn.onclick = ()=>{ state.view = 'students'; render(); };
   const studentsBtn = document.getElementById('btn-dash-view-students');
@@ -5044,6 +5539,7 @@ function statsView(){
 
   return `
   <div class="section-title">الإحصاءات</div>
+  ${attendanceAdminCardHTML()}
 
   <div class="stat-row">
     <div class="stat-card"><div class="num">${state.students.length}</div><div class="lbl">إجمالي الطلاب المسجّلين</div></div>
@@ -5164,6 +5660,7 @@ function statsView(){
 }
 
 function attachStatsHandlers(){
+  attachAdminAttendanceHandlers();
   const monthInput = document.getElementById('stats-report-month');
   const btn = document.getElementById('btn-monthly-report-stats');
   if(btn) btn.onclick = ()=> generateMonthlyReport(btn, 'month', monthInput ? monthInput.value : currentYearMonth());
@@ -5421,6 +5918,8 @@ function attachScheduleHandlers(){
     const teacherSel = document.getElementById('sch-teacher');
     const teacherName = state.currentRole==='teacher' ? (state.currentTeacherLink || '') : (teacherSel ? teacherSel.value : '');
     if(!studentName || !date){ showToast('الرجاء تعبئة اسم الطالب والتاريخ'); return; }
+    const reqGate = teacherStudentGate(studentName);
+    if(reqGate){ if(errEl) errEl.textContent = reqGate; showToast(reqGate); return; }
     if(!isAllowedBookingDay(date)){
       const msg = `الحجز متاح بس أيام ${bookingDaysText()} — اختر تاريخ تاني.`;
       if(errEl) errEl.textContent = msg; showToast(msg); return;
@@ -5752,6 +6251,8 @@ function attachMemorizationHandlers(){
     const quality = document.getElementById('mz-quality').value;
     const note = document.getElementById('mz-note').value.trim();
     if(!studentName){ if(errEl) errEl.textContent='اكتب اسم الطالب'; return; }
+    const reqGate = teacherStudentGate(studentName);
+    if(reqGate){ if(errEl) errEl.textContent = reqGate; return; }
     const rng = mzReadSegments();
     if(rng.error){ if(errEl) errEl.textContent = rng.error; return; }
     const base = Date.now(), nowIso = new Date().toISOString();
@@ -5813,6 +6314,7 @@ function myStudentsView(){
     <div class="stat-card"><div class="num">${missingCount}</div><div class="lbl">بيانات ناقصة</div></div>
   </div>
 
+  ${teacherRequestsCardHTML()}
   <div class="settings-block">
     <h3>استيراد من ملف Excel</h3>
     <p style="font-size:12px; color:var(--ink-soft); margin-bottom:10px;">حمّل النموذج، عبّي بيانات طلابك فيه، وارفعه هون — بينضافوا أو يتحدّثوا تلقائياً (مطابقة حسب الاسم).</p>
@@ -5836,12 +6338,13 @@ function myStudentsView(){
 
   <div class="settings-block">
     <h3>إضافة طالب جديد</h3>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:8px;">الطالب الجديد بينرسل كطلب للمدير، وبينضاف لطلابك بعد ما يقبله.</p>
     <div class="field"><input type="text" id="new-stu-name" placeholder="اسم الطالب"></div>
     <div class="field"><input type="text" id="new-stu-id" placeholder="رقم الهوية (اختياري)"></div>
     <div class="field"><input type="date" id="new-stu-birth" placeholder="تاريخ الميلاد"></div>
     <div class="field"><input type="text" id="new-stu-phone" placeholder="رقم الجوال (اختياري)"></div>
     <div id="new-stu-error" style="font-size:12px; color:var(--red); margin-bottom:8px;"></div>
-    <button class="btn btn-primary" id="btn-add-my-student">إضافة الطالب</button>
+    <button class="btn btn-primary" id="btn-add-my-student">إرسال طلب اعتماد</button>
   </div>
 
   <div class="search-box">
@@ -5863,6 +6366,7 @@ function myStudentsView(){
 }
 
 function attachMyStudentsHandlers(){
+  attachRequestHandlers();
   document.querySelectorAll('.undo-import-batch').forEach(b=>{
     b.onclick = ()=> undoImportBatch(b.dataset.id);
   });
@@ -5879,17 +6383,25 @@ function attachMyStudentsHandlers(){
     if(errEl) errEl.textContent = '';
     const name = document.getElementById('new-stu-name').value.trim();
     if(!name){ if(errEl) errEl.textContent = 'اكتب اسم الطالب'; return; }
-    let student = state.students.find(s => s.name.trim().toLowerCase()===name.toLowerCase());
-    if(!student){
-      student = { id: makeStudentId(), name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
-      state.students.push(student);
+    const nationalId = document.getElementById('new-stu-id').value.trim();
+    const birthDate = document.getElementById('new-stu-birth').value || null;
+    const phone = document.getElementById('new-stu-phone').value.trim();
+    const mine = getTeacherStudentNames(state.currentTeacherLink).has(sreqKey(name));
+    const existing = state.students.find(x=>sreqKey(x.name)===sreqKey(name));
+    if(mine && existing){
+      // Already one of this teacher's students — just refresh the details.
+      if(nationalId) existing.nationalId = nationalId;
+      if(birthDate) existing.birthDate = birthDate;
+      if(phone) existing.phone = phone;
+      existing.registeredByTeacher = existing.registeredByTeacher || state.currentTeacherLink;
+      await saveStudents();
+      showToast('الطالب مسجّل عندك — تم تحديث بياناته');
+      render(); return;
     }
-    student.registeredByTeacher = state.currentTeacherLink;
-    student.nationalId = document.getElementById('new-stu-id').value.trim();
-    student.birthDate = document.getElementById('new-stu-birth').value || null;
-    student.phone = document.getElementById('new-stu-phone').value.trim();
-    await saveStudents();
-    showToast('تم إضافة الطالب');
+    if(pendingRequestFor(name)){ if(errEl) errEl.textContent = 'في طلب معلّق لهذا الطالب بانتظار المدير'; return; }
+    submitStudentRequest({ name, nationalId, birthDate, phone });
+    await saveStudentRequests();
+    showToast('تم إرسال طلب الاعتماد للمدير');
     render();
   };
 
@@ -6080,7 +6592,7 @@ async function importStudentsFromExcel(file){
     const buf = await file.arrayBuffer();
     await wb.xlsx.load(buf);
     const ws = wb.worksheets[0];
-    let added = 0, updated = 0;
+    let requested = 0, updated = 0;
     const batchEntries = [];
     ws.eachRow((row, rowNumber)=>{
       if(rowNumber === 1) return; // header row
@@ -6096,26 +6608,23 @@ async function importStudentsFromExcel(file){
       }
       const phone = String(row.getCell(4).value || '').trim();
 
-      let student = state.students.find(s => s.name.trim().toLowerCase()===name.toLowerCase());
-      let wasNew = false;
-      let prevSnapshot = null;
-      if(!student){
-        student = { id: makeStudentId(), name, phone:'', notes:'', juzProgress:[], createdAt: new Date().toISOString() };
-        state.students.push(student);
-        added++;
-        wasNew = true;
-      } else {
-        updated++;
-        prevSnapshot = {
-          nationalId: student.nationalId || '', birthDate: student.birthDate || null,
-          phone: student.phone || '', registeredByTeacher: student.registeredByTeacher || null,
-        };
+      const mineSet = getTeacherStudentNames(state.currentTeacherLink);
+      let student = state.students.find(x => sreqKey(x.name)===sreqKey(name));
+      if(!(student && mineSet.has(sreqKey(name)))){
+        // Not already this teacher's student → goes to the admin as a request.
+        if(!pendingRequestFor(name)){ submitStudentRequest({ name, nationalId, birthDate, phone }); requested++; }
+        return;
       }
+      updated++;
+      const prevSnapshot = {
+        nationalId: student.nationalId || '', birthDate: student.birthDate || null,
+        phone: student.phone || '', registeredByTeacher: student.registeredByTeacher || null,
+      };
       student.registeredByTeacher = student.registeredByTeacher || state.currentTeacherLink;
       if(nationalId) student.nationalId = nationalId;
       if(birthDate) student.birthDate = birthDate;
       if(phone) student.phone = phone;
-      batchEntries.push({ studentId: student.id, wasNew, prevSnapshot });
+      batchEntries.push({ studentId: student.id, wasNew: false, prevSnapshot });
     });
     if(batchEntries.length){
       state.importBatches.unshift({
@@ -6129,8 +6638,9 @@ async function importStudentsFromExcel(file){
       });
       await saveImportBatches();
     }
+    if(requested) await saveStudentRequests();
     await saveStudents();
-    showToast(`تم الاستيراد: ${added} طالب جديد، ${updated} طالب محدَّث`);
+    showToast(`تم الاستيراد: ${requested} طلب اعتماد أُرسل للمدير، ${updated} طالب محدَّث`);
     render();
   }catch(e){
     console.error(e);
@@ -7375,6 +7885,9 @@ function attachSettingsHandlers(){
     state.memorization = [];
     state.importBatches = [];
     state.trash = [];
+    state.studentRequests = [];
+    await saveStudentRequests();
+    for(const m of Object.keys(state.attendance)){ state.attendance[m] = []; await attSaveMonth(m, true); }
     await saveExams();
     await saveStudents();
     await saveSchedule();
