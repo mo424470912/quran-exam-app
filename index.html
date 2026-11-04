@@ -766,6 +766,29 @@ html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
 .att-dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin:0 4px 0 2px; }
 .att-dot.p{ background:#2E7D5B; } .att-dot.a{ background:#B3392F; } .att-dot.e{ background:#C08A28; } .att-dot.u{ background:#B9B2A0; }
 .att-legend{ font-size:11.5px; color:var(--ink-soft); margin:4px 0 4px; }
+.fin-cards{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:8px; }
+.fin-card{ border-radius:14px; padding:10px 6px; text-align:center; background:var(--paper); border:1.5px solid var(--line); }
+.fin-card .lbl{ font-size:12px; font-weight:700; color:var(--ink-soft); }
+.fin-card .val{ font-size:19px; font-weight:900; margin-top:4px; direction:ltr; }
+.fin-card.in .val{ color:#2E7D5B; } .fin-card.out .val{ color:#B3392F; } .fin-card.net .val{ color:#8A5F10; } .fin-card.net.neg .val{ color:#B3392F; }
+.fin-balance{ font-size:13px; color:var(--ink-soft); margin:2px 2px 14px; }
+.fin-balance b{ color:var(--ink); direction:ltr; display:inline-block; }
+.fin-month{ flex:1; text-align:center; font-weight:900; font-size:17px; color:var(--green); }
+.att-datebar button:disabled{ opacity:.35; cursor:default; }
+.fin-due{ display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--gold-soft,#F4E6C4); border:1px solid var(--gold,#C08A28); border-radius:12px; padding:10px 12px; margin-bottom:12px; font-size:13px; font-weight:700; }
+.fin-due button{ border:none; border-radius:10px; background:var(--green); color:#fff; padding:8px 12px; font-family:'Tajawal'; font-weight:800; cursor:pointer; white-space:nowrap; }
+.fin-bar{ margin-bottom:10px; }
+.fin-bar-top{ display:flex; justify-content:space-between; font-size:13.5px; margin-bottom:4px; }
+.fin-bar-top small{ color:var(--ink-soft); } .fin-bar-top b{ direction:ltr; }
+.fin-bar-track{ height:8px; border-radius:6px; background:var(--line); overflow:hidden; }
+.fin-bar-fill{ height:100%; border-radius:6px; } .fin-bar-fill.in{ background:#2E7D5B; } .fin-bar-fill.out{ background:#B3392F; }
+.fin-row{ display:flex; align-items:center; gap:10px; border:1.5px solid var(--line); border-radius:14px; padding:9px 10px; margin-bottom:8px; background:var(--paper); }
+.fin-ico{ flex:none; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:19px; color:#fff; }
+.fin-ico.in{ background:#2E7D5B; } .fin-ico.out{ background:#B3392F; }
+.fin-main{ flex:1; min-width:0; } .fin-party{ font-weight:800; font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fin-meta{ font-size:11.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fin-amt{ flex:none; font-weight:900; font-size:15px; direction:ltr; } .fin-amt.in{ color:#2E7D5B; } .fin-amt.out{ color:#B3392F; }
+.fin-acts{ flex:none; display:flex; gap:2px; } .fin-acts button{ border:none; background:none; font-size:16px; cursor:pointer; padding:4px; }
 </style>
 </head>
 <body>
@@ -788,6 +811,8 @@ const STORAGE_TRASH = 'trash';
 const STORAGE_CENTER_SETTINGS = 'centerSettings';
 const STORAGE_STUDENT_REQUESTS = 'studentRequests';
 const STORAGE_ATT_PREFIX = 'att_';      // one document per month: att_2026-11
+const STORAGE_FIN_PREFIX = 'fin_';      // finance: one document per month: fin_2026-11
+const STORAGE_FIN_INDEX = 'finIndex';
 const STORAGE_ATT_INDEX = 'attIndex';   // list of months that have attendance data
 
 /* Dark mode: applied immediately (before first render) so there's no
@@ -1137,6 +1162,8 @@ let state = {
   memorization: [], // {id, studentName, teacherName, type: 'new'|'review', pageFrom, pageTo (computed from surah/ayah), surah, ayahFrom, surahTo, ayahTo, pagesAmount (quarter pages), quality, note, date, recordedBy}
   attendance: {}, // 'YYYY-MM' -> [{n:studentName,t:teacher,d:'YYYY-MM-DD',s:'p'|'a'|'e'|'x',o:note,u:updatedAt,b:recordedBy}]
   attIndex: [],
+  finance: {}, // 'YYYY-MM' -> [{id,t:'in'|'out',a:amount,p:party,n:note,d:'YYYY-MM-DD',u:updatedAt,b:by,x:true if deleted}]
+  finIndex: [],
   studentRequests: [], // {id,type:'new'|'transfer',studentName,nationalId,birthDate,phone,teacherName,fromTeacher,requestedBy,requestedAt,updatedAt,status:'pending'|'approved'|'rejected'|'deleted',decidedBy,decidedAt,rejectReason}
   trash: [], // {id, type:'exam'|'student'|'exams-bulk', data, label, deletedAt, deletedBy} — kept 30 days
   importBatches: [], // {id, source:'students-excel', date, importedBy, teacherName, entries:[{studentId, wasNew, prevSnapshot|null}]}
@@ -1329,6 +1356,21 @@ async function syncFromServer(manual){
         changed = true;
       }
     }
+    for(const m of Object.keys(state.finance)){
+      const key = STORAGE_FIN_PREFIX + m;
+      if(pend.has(key) || getPendingSyncKeys().includes(key)) continue;
+      let doc;
+      try{ doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 10000); }catch(e){ continue; }
+      if(!doc.exists) continue;
+      let srv; try{ srv = JSON.parse(doc.data().value); }catch(e){ continue; }
+      if(!Array.isArray(srv)) continue;
+      const merged = finMerge(state.finance[m], srv);
+      if(JSON.stringify(merged) !== JSON.stringify(state.finance[m])){
+        state.finance[m] = merged;
+        try{ localStorage.setItem(key, JSON.stringify(merged)); }catch(e){}
+        changed = true;
+      }
+    }
     if(changed){ applyCenterOverrides(); purgeOldTrash(); }
     if(firebaseAuth){
       const before = JSON.stringify(state.accounts.map(a=>[a.uid,a.username,a.role,a.disabled,a.teacherLink,a.email]));
@@ -1373,6 +1415,7 @@ function maybeShowScheduleReminder(){
   }
 }
 
+let registeringNow = false; // true while a new account is being created, so the auth listener doesn't sign it out before its profile document exists
 let accountsLoadFailed = false; // true if a Firestore accounts read errored (e.g. blocked by security rules pre-login) — must NOT be treated as "zero accounts exist"
 
 async function loadAccountsFromFirestore(forceServer){
@@ -1449,7 +1492,8 @@ function downloadBlob(content, filename, mime){
 
 async function exportDataJSON(){
   try{ await attLoadAll(); }catch(e){}
-  const payload = { attendance: state.attendance || {}, app: 'quran-exam-center', version: 2, exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization, trash: state.trash || [], studentRequests: state.studentRequests || [], centerSettings: state.centerSettings || {} };
+  if(state.currentRole==='admin'){ try{ await finLoadAll(); }catch(e){} }
+  const payload = { attendance: state.attendance || {}, finance: state.currentRole==='admin' ? (state.finance || {}) : undefined, app: 'quran-exam-center', version: 2, exportedAt: new Date().toISOString(), exams: state.exams, students: state.students, schedule: state.schedule, memorization: state.memorization, trash: state.trash || [], studentRequests: state.studentRequests || [], centerSettings: state.centerSettings || {} };
   downloadBlob(JSON.stringify(payload, null, 2), `نسخة-احتياطية-${todayStamp()}.json`, 'application/json');
   if(state.currentRole==='admin'){
     state.centerSettings = { ...(state.centerSettings||{}), lastBackupExportAt: new Date().toISOString() };
@@ -1615,6 +1659,9 @@ async function restoreFullFromFile(file){
     state.memorization = Array.isArray(data.memorization) ? data.memorization : [];
     if(Array.isArray(data.trash)) state.trash = data.trash;
     if(Array.isArray(data.studentRequests)) state.studentRequests = data.studentRequests;
+    if(data.finance && typeof data.finance==='object' && state.currentRole==='admin'){
+      for(const m of Object.keys(data.finance)){ if(Array.isArray(data.finance[m])){ state.finance[m] = data.finance[m]; await finSaveMonth(m); } }
+    }
     if(data.attendance && typeof data.attendance==='object'){
       for(const m of Object.keys(data.attendance)){ if(Array.isArray(data.attendance[m])){ state.attendance[m] = data.attendance[m]; await attSaveMonth(m); } }
     }
@@ -1917,15 +1964,18 @@ async function attSaveMonth(m, noMerge){
 /* Before a queued (offline) write goes out, merge it with what the server
    has now, so reconnecting never wipes records other people added. */
 async function mergeBeforeFlush(key, raw){
+  const isFin = key.startsWith(STORAGE_FIN_PREFIX), isFinIx = key === STORAGE_FIN_INDEX;
   const isAtt = key.startsWith(STORAGE_ATT_PREFIX), isReq = key === STORAGE_STUDENT_REQUESTS, isIx = key === STORAGE_ATT_INDEX;
-  if(!(isAtt || isReq || isIx)) return raw;
+  if(!(isAtt || isReq || isIx || isFin || isFinIx)) return raw;
   try{
     const doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 5000);
     if(!doc.exists) return raw;
     const srv = JSON.parse(doc.data().value), loc = JSON.parse(raw);
     if(!Array.isArray(srv) || !Array.isArray(loc)) return raw;
     let merged;
-    if(isAtt){ merged = attMerge(loc, srv); state.attendance[key.slice(STORAGE_ATT_PREFIX.length)] = merged; }
+    if(isFin){ merged = finMerge(loc, srv); state.finance[key.slice(STORAGE_FIN_PREFIX.length)] = merged; }
+    else if(isFinIx){ merged = [...new Set([...loc, ...srv])].sort(); state.finIndex = merged; }
+    else if(isAtt){ merged = attMerge(loc, srv); state.attendance[key.slice(STORAGE_ATT_PREFIX.length)] = merged; }
     else if(isReq){ merged = sreqMerge(loc, srv); state.studentRequests = merged; }
     else { merged = [...new Set([...loc, ...srv])].sort(); state.attIndex = merged; }
     const out = JSON.stringify(merged);
@@ -2100,6 +2150,363 @@ function attachAdminAttendanceHandlers(){
   const d = document.getElementById('att-admin-date');
   if(d) d.onchange = async ()=>{ if(!d.value) return; attAdminDate = d.value > localDateStamp() ? localDateStamp() : d.value; await attLoadMonth(attAdminDate.slice(0,7)); render(); };
 }
+
+/* ---------------- Finance (المالية) — admin only ----------------
+   Income (وارد) and expenses (صادر), each with the party it came from /
+   went to. One document per month (fin_YYYY-MM); entries merge by id
+   (newest edit wins) so two devices never overwrite each other, and a
+   deleted entry is kept as a hidden marker so the deletion syncs too. */
+function finMerge(a, b){
+  const m = new Map();
+  [...(a||[]), ...(b||[])].forEach(r=>{
+    const c = m.get(r.id);
+    if(!c || String(r.u||'') > String(c.u||'')) m.set(r.id, r);
+  });
+  return [...m.values()];
+}
+async function finLoadMonth(m){
+  if(state.finance[m]) return;
+  let arr = [];
+  try{
+    const r = await storageAdapter.get(STORAGE_FIN_PREFIX + m);
+    if(r){ const v = JSON.parse(r.value); if(Array.isArray(v)) arr = v; }
+  }catch(e){}
+  state.finance[m] = arr;
+}
+async function finLoadIndex(){
+  try{ const ix = await storageAdapter.get(STORAGE_FIN_INDEX); state.finIndex = ix ? JSON.parse(ix.value) : []; }catch(e){ state.finIndex = []; }
+  if(!Array.isArray(state.finIndex)) state.finIndex = [];
+}
+let finLoadedAll = false;
+async function finLoadAll(){
+  await finLoadIndex();
+  const cur = localDateStamp().slice(0,7);
+  await Promise.all([...new Set([...(state.finIndex||[]), cur])].map(m=>finLoadMonth(m)));
+  finLoadedAll = true;
+}
+async function finSaveMonth(m, noMerge){
+  if(!noMerge && firestoreDb && navigator.onLine){
+    try{
+      const doc = await withTimeout(firestoreDb.collection('quran_app').doc(STORAGE_FIN_PREFIX + m).get({ source:'server' }), 4000);
+      if(doc.exists){ const srv = JSON.parse(doc.data().value); if(Array.isArray(srv)) state.finance[m] = finMerge(state.finance[m], srv); }
+    }catch(e){}
+  }
+  await storageAdapter.set(STORAGE_FIN_PREFIX + m, JSON.stringify(state.finance[m] || []));
+  if(!state.finIndex.includes(m)){
+    state.finIndex.push(m); state.finIndex.sort();
+    await storageAdapter.set(STORAGE_FIN_INDEX, JSON.stringify(state.finIndex));
+  }
+}
+function finCurrency(){ return (state.centerSettings && state.centerSettings.currency) || '₪'; }
+function fmtMoney(n){ return (Math.round((+n||0)*100)/100).toLocaleString('en-US', { maximumFractionDigits:2 }); }
+function finEntries(month){ return (state.finance[month] || []).filter(r=>!r.x).slice().sort((a,b)=> b.d.localeCompare(a.d) || String(b.u).localeCompare(String(a.u))); }
+function finTotals(month){
+  let inc = 0, out = 0;
+  finEntries(month).forEach(r=>{ if(r.t==='in') inc += r.a; else out += r.a; });
+  return { inc, out, net: inc - out };
+}
+function finGroupByParty(month, type){
+  const g = {};
+  finEntries(month).filter(r=>r.t===type).forEach(r=>{ const k = (r.p||'غير محدد').trim() || 'غير محدد'; g[k] = g[k] || { total:0, count:0 }; g[k].total += r.a; g[k].count++; });
+  return Object.entries(g).map(([party,v])=>({ party, ...v })).sort((a,b)=>b.total-a.total);
+}
+function finBalanceUpTo(month){
+  let bal = 0;
+  Object.keys(state.finance).filter(m=>m<=month).forEach(m=>{ finEntries(m).forEach(r=>{ bal += r.t==='in' ? r.a : -r.a; }); });
+  return bal;
+}
+function finMonthLabel(m){ const [y,mo] = m.split('-').map(Number); return new Date(y, mo-1, 1).toLocaleDateString('ar-EG', { year:'numeric', month:'long' }); }
+function finShiftMonth(m, n){ const [y,mo] = m.split('-').map(Number); const d = new Date(y, mo-1+n, 1); return localDateStamp(d).slice(0,7); }
+function finPartySuggestions(type){
+  const set = new Set();
+  Object.values(state.finance).forEach(arr=> arr.forEach(r=>{ if(!r.x && r.t===type && r.p) set.add(r.p.trim()); }));
+  return [...set].sort((a,b)=>a.localeCompare(b,'ar'));
+}
+/* In the last 3 days of a month — and the first 3 days of the next —
+   remind the admin that the monthly report is ready. */
+function finReportDueMonth(){
+  const d = new Date(), last = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  if(d.getDate() >= last-2) return localDateStamp(d).slice(0,7);
+  if(d.getDate() <= 3) return finShiftMonth(localDateStamp(d).slice(0,7), -1);
+  return null;
+}
+
+let finMonth = null, finType = 'in', finEditId = null, finDateDraft = null;
+function financeView(){
+  if(state.currentRole !== 'admin') return `<div class="empty-state">هذه الصفحة للمدير فقط.</div>`;
+  if(!finMonth) finMonth = localDateStamp().slice(0,7);
+  if(!finLoadedAll){ finLoadAll().then(()=>{ if(state.view==='finance') render(); }); }
+  const tot = finTotals(finMonth), entries = finEntries(finMonth);
+  const editing = finEditId ? (state.finance[finMonth]||[]).find(r=>r.id===finEditId && !r.x) : null;
+  const type = editing ? editing.t : finType;
+  const due = finReportDueMonth();
+  const cur = finCurrency();
+  const group = (t)=>{
+    const g = finGroupByParty(finMonth, t); const max = g.length ? g[0].total : 1;
+    if(!g.length) return `<p style="font-size:12px;color:var(--ink-soft);">ما في حركات.</p>`;
+    return g.map(x=>`<div class="fin-bar"><div class="fin-bar-top"><span>${escapeHtml(x.party)} <small>(${x.count})</small></span><b>${fmtMoney(x.total)}</b></div><div class="fin-bar-track"><div class="fin-bar-fill ${t}" style="width:${Math.max(4, x.total/max*100)}%"></div></div></div>`).join('');
+  };
+  return `
+  <div class="section-title">المالية</div>
+  ${due ? `<div class="fin-due"><span>📄 تقرير ${escapeHtml(finMonthLabel(due))} المالي جاهز للإصدار</span><button type="button" id="fin-due-btn" data-month="${due}">إصدار التقرير</button></div>` : ''}
+  <div class="att-datebar">
+    <button type="button" id="fin-prev" aria-label="الشهر السابق">›</button>
+    <div class="fin-month">${escapeHtml(finMonthLabel(finMonth))}</div>
+    <button type="button" id="fin-next" aria-label="الشهر التالي" ${finMonth >= localDateStamp().slice(0,7) ? 'disabled' : ''}>‹</button>
+  </div>
+  <div class="fin-cards">
+    <div class="fin-card in"><div class="lbl">الوارد</div><div class="val">${fmtMoney(tot.inc)}</div></div>
+    <div class="fin-card out"><div class="lbl">الصادر</div><div class="val">${fmtMoney(tot.out)}</div></div>
+    <div class="fin-card net ${tot.net<0?'neg':''}"><div class="lbl">صافي الشهر</div><div class="val">${fmtMoney(tot.net)}</div></div>
+  </div>
+  <div class="fin-balance">رصيد المركز حتى نهاية هذا الشهر: <b>${fmtMoney(finBalanceUpTo(finMonth))} ${escapeHtml(cur)}</b></div>
+
+  <div class="settings-block">
+    <h3>${editing ? 'تعديل حركة' : 'تسجيل حركة'}</h3>
+    <div class="dir-toggle" id="fin-type" style="margin-bottom:10px;">
+      <button type="button" data-t="in" class="${type==='in'?'on':''}">＋ وارد</button>
+      <button type="button" data-t="out" class="${type==='out'?'on':''}">− صادر</button>
+    </div>
+    <div class="field"><label>المبلغ (${escapeHtml(cur)})</label><input class="plain-input" type="number" id="fin-amount" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${editing ? editing.a : ''}"></div>
+    <div class="field"><label id="fin-party-lbl">${type==='in' ? 'جهة الوارد (من أين؟)' : 'جهة الصرف (وين راح؟)'}</label>
+      <input class="plain-input" type="text" id="fin-party" list="fin-party-list" placeholder="${type==='in' ? 'مثال: تبرع فاعل خير، رسوم الطلاب...' : 'مثال: رواتب المحفظين، كهرباء، قرطاسية...'}" value="${editing ? escapeHtml(editing.p) : ''}">
+      <datalist id="fin-party-list">${finPartySuggestions(type).map(x=>`<option value="${escapeHtml(x)}">`).join('')}</datalist></div>
+    <div class="field"><label>التاريخ</label><input class="plain-input" type="date" id="fin-date" value="${editing ? editing.d : (finDateDraft || localDateStamp())}" max="${localDateStamp()}"></div>
+    <div class="field"><label>ملاحظة (اختياري)</label><input class="plain-input" type="text" id="fin-note" placeholder="تفاصيل إضافية..." value="${editing ? escapeHtml(editing.n||'') : ''}"></div>
+    <div id="fin-error" style="font-size:12px;color:var(--red);margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" id="fin-save" style="flex:1;">${editing ? 'حفظ التعديل' : 'إضافة'}</button>
+      ${editing ? `<button class="btn" id="fin-cancel-edit" style="flex:none;width:auto;padding:0 18px;">إلغاء</button>` : ''}
+    </div>
+  </div>
+
+  <div class="settings-block"><h3>الوارد حسب الجهة</h3>${group('in')}</div>
+  <div class="settings-block"><h3>الصادر حسب الوجهة</h3>${group('out')}</div>
+
+  <div class="section-title" style="font-size:16px;">حركات الشهر <span class="acc-meta">${entries.length}</span></div>
+  ${entries.length ? entries.map(r=>`
+    <div class="fin-row">
+      <div class="fin-ico ${r.t}">${r.t==='in' ? '＋' : '−'}</div>
+      <div class="fin-main">
+        <div class="fin-party">${escapeHtml(r.p||'غير محدد')}</div>
+        <div class="fin-meta">${new Date(r.d+'T12:00:00').toLocaleDateString('ar-EG',{day:'numeric',month:'short'})}${r.n ? ' · ' + escapeHtml(r.n) : ''}</div>
+      </div>
+      <div class="fin-amt ${r.t}">${r.t==='in' ? '+' : '−'}${fmtMoney(r.a)}</div>
+      <div class="fin-acts"><button type="button" class="fin-edit" data-id="${r.id}" aria-label="تعديل">✏️</button><button type="button" class="fin-del" data-id="${r.id}" aria-label="حذف">🗑</button></div>
+    </div>`).join('') : `<div class="empty-state">ما في حركات مسجّلة بهذا الشهر</div>`}
+
+  <div class="settings-block" style="margin-top:14px;">
+    <h3>تقرير ${escapeHtml(finMonthLabel(finMonth))}</h3>
+    <div class="data-btn-row">
+      <button id="fin-report-pdf">تقرير PDF</button>
+      <button class="ghost" id="fin-report-xlsx">تصدير Excel</button>
+    </div>
+    <div class="field" style="margin-top:12px;"><label>رمز العملة</label><input class="plain-input" type="text" id="fin-currency" maxlength="8" value="${escapeHtml(cur)}"></div>
+  </div>`;
+}
+function attachFinanceHandlers(){
+  if(state.currentRole !== 'admin') return;
+  const go = async (m)=>{ finMonth = m; finEditId = null; await finLoadMonth(m); render(); };
+  const prev = document.getElementById('fin-prev'); if(prev) prev.onclick = ()=> go(finShiftMonth(finMonth,-1));
+  const next = document.getElementById('fin-next'); if(next) next.onclick = ()=>{ if(finMonth < localDateStamp().slice(0,7)) go(finShiftMonth(finMonth,1)); };
+  document.querySelectorAll('#fin-type button').forEach(b=> b.onclick = ()=>{
+    if(finEditId) return;
+    finType = b.dataset.t;
+    // keep what was typed while switching the type
+    const keep = { a:document.getElementById('fin-amount').value, p:'', d:document.getElementById('fin-date').value, n:document.getElementById('fin-note').value };
+    finDateDraft = keep.d; render();
+    document.getElementById('fin-amount').value = keep.a; document.getElementById('fin-note').value = keep.n;
+  });
+  const save = document.getElementById('fin-save');
+  if(save) save.onclick = async ()=>{
+    const err = document.getElementById('fin-error'); err.textContent = '';
+    const amount = parseFloat(document.getElementById('fin-amount').value);
+    const party = document.getElementById('fin-party').value.trim();
+    const date = document.getElementById('fin-date').value;
+    const note = document.getElementById('fin-note').value.trim();
+    if(!(amount > 0)){ err.textContent = 'اكتب مبلغاً أكبر من صفر'; return; }
+    if(!party){ err.textContent = finType==='in' && !finEditId ? 'اكتب جهة الوارد' : 'اكتب الجهة'; return; }
+    if(!date){ err.textContent = 'اختر التاريخ'; return; }
+    if(date > localDateStamp()){ err.textContent = 'ما بتقدر تسجّل حركة بتاريخ مستقبلي'; return; }
+    const now = new Date().toISOString();
+    const editing = finEditId ? Object.values(state.finance).flat().find(r=>r.id===finEditId) : null;
+    if(editing){
+      // moved to another month? remove from the old one, add to the new
+      const oldM = editing.d.slice(0,7), newM = date.slice(0,7);
+      if(oldM !== newM){
+        editing.x = true; editing.u = now;
+        await finLoadMonth(newM);
+        state.finance[newM].push({ id: editing.id, t: editing.t, a: amount, p: party, n: note, d: date, u: now, b: state.currentUser });
+        await finSaveMonth(oldM); await finSaveMonth(newM);
+      } else {
+        Object.assign(editing, { a: amount, p: party, n: note, d: date, u: now, b: state.currentUser });
+        await finSaveMonth(oldM);
+      }
+      finEditId = null; showToast('تم حفظ التعديل');
+    } else {
+      const m = date.slice(0,7);
+      await finLoadMonth(m);
+      state.finance[m].push({ id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2,5), t: finType, a: amount, p: party, n: note, d: date, u: now, b: state.currentUser });
+      await finSaveMonth(m);
+      finDateDraft = date; finMonth = m;
+      showToast(finType==='in' ? 'تم تسجيل الوارد' : 'تم تسجيل الصادر');
+    }
+    render();
+  };
+  const cancel = document.getElementById('fin-cancel-edit'); if(cancel) cancel.onclick = ()=>{ finEditId = null; render(); };
+  document.querySelectorAll('.fin-edit').forEach(b=> b.onclick = ()=>{ finEditId = b.dataset.id; render(); window.scrollTo({ top: 0, behavior:'smooth' }); });
+  document.querySelectorAll('.fin-del').forEach(b=> b.onclick = async ()=>{
+    const r = Object.values(state.finance).flat().find(x=>x.id===b.dataset.id); if(!r) return;
+    if(!confirm(`حذف حركة «${r.p}» بمبلغ ${fmtMoney(r.a)}؟`)) return;
+    r.x = true; r.u = new Date().toISOString();
+    await finSaveMonth(r.d.slice(0,7)); showToast('تم الحذف'); render();
+  });
+  const cur = document.getElementById('fin-currency');
+  if(cur) cur.onchange = async ()=>{
+    state.centerSettings = state.centerSettings || {};
+    state.centerSettings.currency = cur.value.trim() || '₪';
+    await saveCenterSettings(); render();
+  };
+  const pdf = document.getElementById('fin-report-pdf'); if(pdf) pdf.onclick = ()=> exportFinanceReportPDF(finMonth, pdf);
+  const xl = document.getElementById('fin-report-xlsx'); if(xl) xl.onclick = ()=> exportFinanceExcel(finMonth, xl);
+  const due = document.getElementById('fin-due-btn'); if(due) due.onclick = async ()=>{ await finLoadMonth(due.dataset.month); exportFinanceReportPDF(due.dataset.month, due); };
+}
+
+async function drawFinanceReportPages(month){
+  await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
+  const logo = await loadLogoImage();
+  const W = 1240, H = 1754, mX = 70, cw = W - mX*2, cur = finCurrency();
+  const C = { green:'#0F5C45', greenD:'#0A4634', gold:'#C79A2E', goldL:'#E8C766', cream:'#FBF4E2', ink:'#17332A', soft:'#6B6355', red:'#B3392F', line:'#E4DCC8' };
+  const tot = finTotals(month), entries = finEntries(month).slice().sort((a,b)=> a.d.localeCompare(b.d));
+  const inG = finGroupByParty(month, 'in'), outG = finGroupByParty(month, 'out');
+  const pages = []; let canvas, ctx, y, pageNo = 0;
+  const fit = (t, maxW)=>{ t = String(t||''); if(ctx.measureText(t).width <= maxW) return t; while(t.length>1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0,-1); return t + '…'; };
+  const R = (txt, x, yy, font, color, maxW)=>{ ctx.direction='rtl'; ctx.textAlign='right'; ctx.font = font; ctx.fillStyle = color; ctx.fillText(maxW ? fit(txt, maxW) : txt, x, yy); };
+  const L = (txt, x, yy, font, color)=>{ ctx.direction='ltr'; ctx.textAlign='left'; ctx.font = font; ctx.fillStyle = color; ctx.fillText(txt, x, yy); };
+  function newPage(first){
+    canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H; ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H); pageNo++; pages.push(canvas);
+    if(first){
+      const g = ctx.createLinearGradient(0,0,W,260); g.addColorStop(0,C.greenD); g.addColorStop(1,C.green);
+      ctx.fillStyle = g; ctx.fillRect(0,0,W,260);
+      ctx.fillStyle = C.gold; ctx.fillRect(0,256,W,6);
+      if(logo){ ctx.save(); ctx.beginPath(); ctx.arc(W-mX-80, 130, 80, 0, 7); ctx.clip(); ctx.drawImage(logo, W-mX-160, 50, 160, 160); ctx.restore(); }
+      R(getCenterSettings().fullName || getCenterSettings().name, W-mX-190, 100, "800 34px 'Tajawal'", '#fff');
+      R('التقرير المالي الشهري', W-mX-190, 160, "900 52px 'Tajawal'", C.goldL);
+      R(finMonthLabel(month), W-mX-190, 212, "700 30px 'Tajawal'", '#E8E2D0');
+      y = 310;
+    } else y = 90;
+  }
+  function ensure(h){ if(y + h > H - 120){ newPage(false); } }
+  function section(title){
+    ensure(110); rrPath(ctx, mX, y, cw, 62, 18); ctx.fillStyle = C.green; ctx.fill();
+    R(title, mX+cw-26, y+42, "800 30px 'Tajawal'", '#fff'); y += 82;
+  }
+  function partyTable(list, total, color){
+    if(!list.length){ ensure(60); R('لا توجد حركات', mX+cw-10, y+30, "600 24px 'Tajawal'", C.soft); y += 60; return; }
+    list.forEach((x,i)=>{
+      ensure(56);
+      if(i%2===0){ ctx.fillStyle = C.cream; ctx.fillRect(mX, y, cw, 56); }
+      R(x.party, mX+cw-16, y+37, "700 25px 'Tajawal'", C.ink, 520);
+      R(`${x.count} ${x.count===1?'حركة':'حركات'}`, mX+cw-640, y+37, "600 22px 'Tajawal'", C.soft);
+      ctx.fillStyle = color; L(fmtMoney(x.total) + ' ' + cur, mX+16, y+37, "800 25px 'Tajawal'", color);
+      R(total ? Math.round(x.total/total*100) + '%' : '', mX+300, y+37, "700 22px 'Tajawal'", C.soft);
+      y += 56;
+    });
+    y += 10;
+  }
+  newPage(true);
+  // summary boxes
+  const bw = (cw - 40)/3;
+  [['الوارد', tot.inc, C.green], ['الصادر', tot.out, C.red], ['صافي الشهر', tot.net, tot.net<0 ? C.red : C.gold]].forEach((b,i)=>{
+    const x = mX + cw - (i+1)*bw - i*20;
+    rrPath(ctx, x, y, bw, 150, 22); ctx.fillStyle = C.cream; ctx.fill(); ctx.strokeStyle = b[2]; ctx.lineWidth = 3; ctx.stroke();
+    ctx.textAlign='center'; ctx.direction='rtl'; ctx.fillStyle = C.soft; ctx.font = "700 26px 'Tajawal'"; ctx.fillText(b[0], x+bw/2, y+44);
+    ctx.fillStyle = b[2]; ctx.font = "900 44px 'Tajawal'"; ctx.direction='ltr'; ctx.fillText(fmtMoney(b[1]), x+bw/2, y+104);
+    ctx.fillStyle = C.soft; ctx.font = "600 22px 'Tajawal'"; ctx.direction='rtl'; ctx.fillText(cur, x+bw/2, y+136);
+  });
+  y += 180;
+  R(`رصيد المركز حتى نهاية الشهر: ${fmtMoney(finBalanceUpTo(month))} ${cur}`, mX+cw, y+8, "800 28px 'Tajawal'", C.ink);
+  y += 50;
+  section('الوارد حسب الجهة'); partyTable(inG, tot.inc, C.green);
+  section('الصادر حسب الوجهة'); partyTable(outG, tot.out, C.red);
+  section('تفاصيل الحركات');
+  if(!entries.length){ R('لا توجد حركات بهذا الشهر', mX+cw-10, y+30, "600 24px 'Tajawal'", C.soft); y += 60; }
+  const hdr = ()=>{ ensure(56); ctx.fillStyle = C.line; ctx.fillRect(mX, y, cw, 50);
+    R('الجهة', mX+cw-16, y+34, "800 22px 'Tajawal'", C.ink); R('النوع', mX+cw-520, y+34, "800 22px 'Tajawal'", C.ink); R('التاريخ', mX+cw-640, y+34, "800 22px 'Tajawal'", C.ink); R('ملاحظة', mX+cw-780, y+34, "800 22px 'Tajawal'", C.ink);
+    ctx.direction='ltr'; ctx.textAlign='left'; ctx.font = "800 22px 'Tajawal'"; ctx.fillStyle = C.ink; ctx.fillText('المبلغ', mX+16, y+34); y += 50; };
+  if(entries.length) hdr();
+  entries.forEach((r,i)=>{
+    if(y + 52 > H - 120){ newPage(false); hdr(); }
+    if(i%2===0){ ctx.fillStyle = C.cream; ctx.fillRect(mX, y, cw, 52); }
+    R(r.p||'غير محدد', mX+cw-16, y+35, "700 23px 'Tajawal'", C.ink, 300);
+    R(r.t==='in' ? 'وارد' : 'صادر', mX+cw-520, y+35, "800 22px 'Tajawal'", r.t==='in' ? C.green : C.red);
+    R(new Date(r.d+'T12:00:00').toLocaleDateString('ar-EG',{day:'numeric',month:'numeric'}), mX+cw-640, y+35, "600 22px 'Tajawal'", C.soft);
+    R(r.n||'', mX+cw-780, y+35, "600 21px 'Tajawal'", C.soft, 250);
+    L((r.t==='in'?'+':'−') + fmtMoney(r.a), mX+16, y+35, "800 23px 'Tajawal'", r.t==='in' ? C.green : C.red);
+    y += 52;
+  });
+  // signature + footers
+  ensure(190); y += 40;
+  ctx.strokeStyle = C.soft; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(mX+cw-360, y+70); ctx.lineTo(mX+cw, y+70); ctx.stroke();
+  ctx.textAlign='center'; ctx.direction='rtl'; ctx.font = "700 24px 'Tajawal'"; ctx.fillStyle = C.ink;
+  ctx.fillText('مدير المركز: ' + getCenterSettings().directorName, mX+cw-180, y+110);
+  pages.forEach((cv,i)=>{
+    const c = cv.getContext('2d'); c.textAlign='center'; c.direction='rtl'; c.font = "600 20px 'Tajawal'"; c.fillStyle = C.soft;
+    c.fillText(`صفحة ${i+1} من ${pages.length}  ·  أُصدر بتاريخ ${new Date().toLocaleDateString('ar-EG',{year:'numeric',month:'long',day:'numeric'})}`, W/2, H-50);
+  });
+  return pages;
+}
+async function exportFinanceReportPDF(month, btnEl){
+  if(btnEl) btnEl.disabled = true;
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){ showToast('تعذّر تحميل مكتبة PDF — تأكد من الإنترنت أول مرة'); return; }
+    await finLoadMonth(month);
+    if(!state.finance[month] || !finEntries(month).length){ showToast('ما في حركات مسجّلة بهذا الشهر'); return; }
+    const pages = await drawFinanceReportPages(month);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation:'p', unit:'pt', format:[pages[0].width, pages[0].height] });
+    pages.forEach((cv,i)=>{ if(i>0) pdf.addPage([cv.width, cv.height], 'p'); pdf.addImage(cv.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, cv.width, cv.height); });
+    const fileName = `تقرير-مالي-${month}.pdf`;
+    const blob = pdf.output('blob');
+    const file = new File([blob], fileName, { type:'application/pdf' });
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file], title:'التقرير المالي', text:'التقرير المالي لشهر ' + finMonthLabel(month) });
+    } else {
+      const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      showToast('تم حفظ التقرير المالي كملف PDF');
+    }
+  }catch(e){ if(e && e.name !== 'AbortError'){ console.error(e); showToast('تعذّر إصدار التقرير، حاول مرة ثانية'); } }
+  finally{ if(btnEl) btnEl.disabled = false; }
+}
+async function exportFinanceExcel(month, btnEl){
+  if(btnEl) btnEl.disabled = true;
+  try{
+    await finLoadMonth(month);
+    const entries = finEntries(month).slice().sort((a,b)=> a.d.localeCompare(b.d));
+    if(!entries.length){ showToast('ما في حركات مسجّلة بهذا الشهر'); return; }
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('الحركات', { views:[{ rightToLeft:true }] });
+    ws.columns = [{ header:'التاريخ', key:'d', width:14 }, { header:'النوع', key:'t', width:10 }, { header:'الجهة', key:'p', width:30 }, { header:'المبلغ', key:'a', width:14 }, { header:'ملاحظة', key:'n', width:34 }];
+    ws.getRow(1).font = { bold:true };
+    entries.forEach(r=> ws.addRow({ d:r.d, t:r.t==='in'?'وارد':'صادر', p:r.p, a:r.t==='in'?r.a:-r.a, n:r.n||'' }));
+    const tot = finTotals(month);
+    ws.addRow({}); ws.addRow({ p:'إجمالي الوارد', a:tot.inc }); ws.addRow({ p:'إجمالي الصادر', a:-tot.out }); const last = ws.addRow({ p:'الصافي', a:tot.net }); last.font = { bold:true };
+    const sm = wb.addWorksheet('حسب الجهة', { views:[{ rightToLeft:true }] });
+    sm.columns = [{ header:'النوع', key:'t', width:10 }, { header:'الجهة', key:'p', width:32 }, { header:'عدد الحركات', key:'c', width:14 }, { header:'المجموع', key:'a', width:14 }];
+    sm.getRow(1).font = { bold:true };
+    finGroupByParty(month,'in').forEach(x=> sm.addRow({ t:'وارد', p:x.party, c:x.count, a:x.total }));
+    finGroupByParty(month,'out').forEach(x=> sm.addRow({ t:'صادر', p:x.party, c:x.count, a:x.total }));
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = `مالية-${month}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    showToast('تم تصدير ملف Excel');
+  }catch(e){ console.error(e); showToast('تعذّر التصدير'); }
+  finally{ if(btnEl) btnEl.disabled = false; }
+}
+function iconFinance(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2.5" y="6" width="19" height="13" rx="2.5"/><circle cx="12" cy="12.5" r="3"/><path d="M6 9.5h.01M18 15.5h.01"/></svg>`; }
 
 async function saveTrash(){
   await storageAdapter.set(STORAGE_TRASH, JSON.stringify(state.trash || []));
@@ -2702,7 +3109,7 @@ function recoverForm(){
 }
 
 function registerForm(){
-  const forced = state.accounts.length === 0;
+  const forced = state.accounts.length === 0 && !accountsLoadFailed;
   return `
     ${forced ? '<p class="hint" style="margin-bottom:10px;">أنشئ أول حساب مدير لبدء استخدام التطبيق</p>' : ''}
     <div class="field">
@@ -2768,6 +3175,8 @@ function attachAuthHandlers(){
         state.currentTeacherLink = data.teacherLink || null;
         state.currentUid = cred.user.uid;
         state.view = state.currentRole==='teacher' ? 'schedule' : 'dashboard';
+        errEl.textContent = 'جاري تحميل البيانات...';
+        try{ await loadAppData(); }catch(e2){ console.warn(e2); }
         render();
       }catch(e){
         errEl.textContent = mapAuthError(e);
@@ -2907,7 +3316,7 @@ function attachAuthHandlers(){
     const u = document.getElementById('reg-user').value.trim();
     const email = document.getElementById('reg-email').value.trim();
     const p = document.getElementById('reg-pass').value;
-    const forced = state.accounts.length === 0;
+    const forced = state.accounts.length === 0 && !accountsLoadFailed;
     const role = forced ? 'admin' : (document.getElementById('reg-role').value || 'examiner');
     const teacherLinkEl = document.getElementById('reg-teacher-link');
     const teacherLink = (role==='teacher' && teacherLinkEl) ? teacherLinkEl.value : null;
@@ -2919,11 +3328,23 @@ function attachAuthHandlers(){
     if (firebaseAuth){
       if(p.length < 6){ errEl.textContent='كلمة المرور يجب أن لا تقل عن 6 أحرف'; return; }
       btnReg.disabled = true;
+      registeringNow = true;
       try{
         const cred = await firebaseAuth.createUserWithEmailAndPassword(email, p);
         await firestoreDb.collection('users').doc(cred.user.uid).set({
-          username: u, email, role, teacherLink: teacherLink || null, disabled: false, createdAt: new Date().toISOString()
+          username: u, email, role, teacherLink: teacherLink || null, disabled: !forced, createdAt: new Date().toISOString()
         });
+        if(!forced){
+          // Pending: the admin must activate the account before it can sign in.
+          registeringNow = false;
+          try{ await firebaseAuth.signOut(); }catch(e3){}
+          state.currentUser = null; state.currentRole = null; state.currentUid = null; state.currentTeacherLink = null;
+          state.authMode = 'login';
+          render();
+          showToast('تم إنشاء حسابك — بانتظار تفعيل المدير قبل أول دخول');
+          return;
+        }
+        try{ await loadAppData(); }catch(e2){}
         state.currentUser = u;
         state.currentRole = role;
         state.currentTeacherLink = teacherLink || null;
@@ -2934,6 +3355,7 @@ function attachAuthHandlers(){
       }catch(e){
         errEl.textContent = mapAuthError(e);
       }finally{
+        registeringNow = false;
         btnReg.disabled = false;
       }
       return;
@@ -3010,6 +3432,7 @@ function mainScreen(){
     : currentView==='memorization' ? memorizationView
     : currentView==='myStudents' ? myStudentsView
     : currentView==='attendance' ? attendanceView
+    : currentView==='finance' ? financeView
     : settingsView;
   return `
   <div class="topbar">
@@ -3038,6 +3461,7 @@ function mainScreen(){
     <button class="tab-btn ${state.view==='history'?'active':''} ${examLocked?'tab-locked':''}" data-view="history">${iconHistory()}<span>السجل</span></button>
     <button class="tab-btn ${state.view==='students'?'active':''} ${examLocked?'tab-locked':''}" data-view="students">${iconStudents()}<span>الطلاب</span></button>
     <button class="tab-btn ${state.view==='stats'?'active':''} ${examLocked?'tab-locked':''}" data-view="stats">${iconStats()}<span>إحصاءات</span></button>
+    ${state.currentRole==='admin' ? `<button class="tab-btn ${state.view==='finance'?'active':''} ${examLocked?'tab-locked':''}" data-view="finance">${iconFinance()}<span>المالية</span></button>` : ''}
     <button class="tab-btn ${state.view==='settings'?'active':''} ${examLocked?'tab-locked':''}" data-view="settings">${iconSettings()}<span>الإعدادات</span></button>
     `}
   </div>
@@ -3090,6 +3514,7 @@ function attachMainHandlers(){
   if(currentView==='memorization') attachMemorizationHandlers();
   if(currentView==='myStudents') attachMyStudentsHandlers();
   if(currentView==='attendance') attachAttendanceHandlers();
+  if(currentView==='finance') attachFinanceHandlers();
   if(currentView==='settings') attachSettingsHandlers();
 }
 
@@ -7888,6 +8313,7 @@ function attachSettingsHandlers(){
     state.studentRequests = [];
     await saveStudentRequests();
     for(const m of Object.keys(state.attendance)){ state.attendance[m] = []; await attSaveMonth(m, true); }
+    try{ await finLoadAll(); for(const m of Object.keys(state.finance)){ state.finance[m] = []; await finSaveMonth(m, true); } }catch(e){}
     await saveExams();
     await saveStudents();
     await saveSchedule();
@@ -7966,6 +8392,7 @@ if (firebaseAuth){
   }
 
   firebaseAuth.onAuthStateChanged(async (user)=>{
+    if (registeringNow) return;
     if (user){
       try{
         const doc = await withTimeout(firestoreDb.collection('users').doc(user.uid).get(), 5000);
