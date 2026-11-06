@@ -2525,12 +2525,11 @@ function waNormalizePhone(raw){
   return d;
 }
 function openWhatsApp(digits, text){
-  const url = `https://api.whatsapp.com/send?phone=${digits}&text=${encodeURIComponent(text)}`;
-  try{
-    const a = document.createElement('a');
-    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-    document.body.appendChild(a); a.click(); a.remove();
-  }catch(e){ location.href = url; }
+  // same method the exam-results button uses (known to work on this install)
+  const url = `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  let w = null;
+  try{ w = window.open(url, '_blank'); }catch(e){}
+  if(!w) location.href = url;
 }
 async function saveTrash(){
   await storageAdapter.set(STORAGE_TRASH, JSON.stringify(state.trash || []));
