@@ -2106,8 +2106,8 @@ function attachAttendanceHandlers(){
       if(wa){
         const student = state.students.find(x=>sreqKey(x.name)===sreqKey(wa.dataset.name));
         if(!student || !student.phone) return;
-        const phoneDigits = student.phone.replace(/[^\d+]/g, '').replace(/^0+/, '');
-        window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(attendanceAbsenceMessage(student.name, attDate))}`, '_blank');
+        const phoneDigits = waNormalizePhone(student.phone);
+        openWhatsApp(phoneDigits, attendanceAbsenceMessage(student.name, attDate));
       }
     };
     listEl.onchange = async (ev)=>{
@@ -2508,6 +2508,30 @@ async function exportFinanceExcel(month, btnEl){
 }
 function iconFinance(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2.5" y="6" width="19" height="13" rx="2.5"/><circle cx="12" cy="12.5" r="3"/><path d="M6 9.5h.01M18 15.5h.01"/></svg>`; }
 
+/* WhatsApp: a local number like 0599123456 must carry a country code
+   (default 970) or wa.me can't find the contact. Numbers typed with + or 00
+   keep their own code. Opened through a real link click (not window.open)
+   so installed apps / TWA hand it to the WhatsApp app instead of blocking it. */
+function waNormalizePhone(raw){
+  let d = String(raw||'').trim();
+  const intl = d.startsWith('+') || d.startsWith('00');
+  d = d.replace(/\D/g, '');
+  if(d.startsWith('00')) d = d.slice(2);
+  if(!intl){
+    const cc = String((state.centerSettings && state.centerSettings.countryCode) || '970').replace(/\D/g,'');
+    if(d.startsWith('0')) d = cc + d.replace(/^0+/, '');
+    else if(d.length <= 9) d = cc + d;
+  }
+  return d;
+}
+function openWhatsApp(digits, text){
+  const url = `https://api.whatsapp.com/send?phone=${digits}&text=${encodeURIComponent(text)}`;
+  try{
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){ location.href = url; }
+}
 async function saveTrash(){
   await storageAdapter.set(STORAGE_TRASH, JSON.stringify(state.trash || []));
 }
@@ -4258,9 +4282,9 @@ function attachShareHandlers(){
       if(!record) return;
       const student = state.students.find(s => s.name.trim().toLowerCase()===record.studentName.trim().toLowerCase());
       if(!student || !student.phone) return;
-      const phoneDigits = student.phone.replace(/[^\d+]/g, '').replace(/^0+/, '');
+      const phoneDigits = waNormalizePhone(student.phone);
       const msg = generateParentMessage(record, student);
-      window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`, '_blank');
+      openWhatsApp(phoneDigits, msg);
     };
   });
 }
@@ -7450,11 +7474,11 @@ function attachStudentDetailHandlers(){
     const lastExam = state.exams
       .filter(e => e.studentName.trim().toLowerCase()===student.name.trim().toLowerCase())
       .sort((a,b)=> new Date(b.date)-new Date(a.date))[0];
-    const phoneDigits = student.phone.replace(/[^\d+]/g, '').replace(/^0+/, '');
+    const phoneDigits = waNormalizePhone(student.phone);
     const msg = lastExam
       ? generateParentMessage(lastExam, student)
       : `${getCenterSettings().fullName}\nالطالب: ${student.name}\nالتقدّم التراكمي: ${student.juzProgress.length}/30 جزء`;
-    window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(msg)}`, '_blank');
+    openWhatsApp(phoneDigits, msg);
   };
 
   // Exam history list within the student's page reuses the same
