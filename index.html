@@ -6,7 +6,7 @@
 <meta name="author" content="محمد حسام عاشور">
 <meta name="copyright" content="©2026 محمد حسام عاشور">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-<title>اختبارات حفظ القرآن الكريم</title>
+<title>إدارة مراكز تحفيظ القرآن الكريم</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1B4332">
 <link rel="icon" href="icon-192.png">
@@ -14,7 +14,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="اختبارات القرآن">
+<meta name="apple-mobile-web-app-title" content="مراكز التحفيظ">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@400;600;700;800&family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -813,6 +813,13 @@ html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
 .center-card.archived{ opacity:.65; }
 .center-actions{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; } .center-actions button{ flex:1; font-size:12.5px; padding:8px 6px; }
 .center-actions .danger{ color:#B3392F; border-color:#B3392F; }
+.subtabs{ padding:0 0 12px; }
+.subtab{ flex:1; border:1.5px solid var(--line); background:var(--paper); border-radius:12px; padding:9px 4px; font-family:'Tajawal'; font-weight:800; font-size:13px; cursor:pointer; color:var(--ink); }
+.subtab.on{ background:var(--green); color:#fff; border-color:var(--green); }
+.home-actions{ display:flex; gap:8px; margin-top:12px; } .home-actions .btn{ flex:1; }
+.mz-trow{ border-bottom:1px dashed var(--line); padding:8px 0; } .mz-trow:last-child{ border-bottom:none; }
+.mz-thead{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px; }
+.mz-tmeta{ display:flex; justify-content:space-between; font-size:11.5px; color:var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -2204,7 +2211,7 @@ function attachAttendanceHandlers(){
   }
 }
 function attendanceAdminCardHTML(){
-  if(state.currentRole !== 'admin') return '';
+  if(state.currentRole === 'teacher') return '';
   if(!attAdminDate) attAdminDate = localDateStamp();
   const date = attAdminDate, month = date.slice(0,7);
   const arr = (state.attendance[month] || []).filter(r=>r.d===date && r.s!=='x');
@@ -3580,7 +3587,7 @@ function authScreen(){
       <div class="brand-badge">${escapeHtml(cs.tagline)}</div>
       <div class="brand-title-row">
         ${sparkleIconSvg()}
-        <h1>برنامج اختبارات القرآن الكريم</h1>
+        <h1>برنامج إدارة مراكز تحفيظ القرآن الكريم</h1>
         ${sparkleIconSvg()}
       </div>
       <div class="brand-sub-row">
@@ -3763,7 +3770,7 @@ function attachAuthHandlers(){
         state.currentRole = data.role || 'examiner';
         state.currentTeacherLink = data.teacherLink || null;
         state.currentUid = cred.user.uid;
-        state.view = state.currentRole==='teacher' ? 'schedule' : 'dashboard';
+        state.view = 'dashboard';
         errEl.textContent = 'جاري تحميل البيانات...';
         try{ await loadAppData(); }catch(e2){ console.warn(e2); }
         render();
@@ -3783,7 +3790,7 @@ function attachAuthHandlers(){
     state.currentRole = found.role || 'examiner';
     state.currentTeacherLink = found.teacherLink || null;
     state.currentLocalId = found.localId || null;
-    state.view = state.currentRole==='teacher' ? 'schedule' : 'dashboard';
+    state.view = 'dashboard';
     render();
   };
 
@@ -3884,7 +3891,7 @@ function attachAuthHandlers(){
     state.currentTeacherLink = acc.teacherLink || null;
     state.currentLocalId = acc.localId || null;
     state.authMode = 'login';
-    state.view = state.currentRole==='teacher' ? 'schedule' : 'dashboard';
+    state.view = 'dashboard';
     showToast('تم استرجاع الوصول وتسجيل الدخول بنجاح');
     render();
   };
@@ -3940,7 +3947,7 @@ function attachAuthHandlers(){
         state.currentTeacherLink = teacherLink || null;
         state.currentUid = cred.user.uid;
         state.authMode = 'login';
-        state.view = role==='teacher' ? 'schedule' : 'dashboard';
+        state.view = 'dashboard';
         render();
       }catch(e){
         errEl.textContent = mapAuthError(e);
@@ -3962,7 +3969,7 @@ function attachAuthHandlers(){
     state.currentTeacherLink = teacherLink || null;
     state.currentLocalId = newAcc.localId;
     state.authMode = 'login';
-    state.view = role==='teacher' ? 'schedule' : 'dashboard';
+    state.view = 'dashboard';
     render();
   };
 }
@@ -3984,7 +3991,7 @@ function iconWhatsappSvg(){ return `<svg viewBox="0 0 24 24" fill="currentColor"
 
 function effectiveView(){
   const isTeacherRole = state.currentRole === 'teacher';
-  return isTeacherRole && !['schedule','history','memorization','myStudents','attendance','settings'].includes(state.view) ? 'schedule' : state.view;
+  return isTeacherRole && !['dashboard','schedule','history','memorization','myStudents','attendance','settings'].includes(state.view) ? 'dashboard' : state.view;
 }
 
 function syncStatusBadge(){
@@ -4010,7 +4017,7 @@ function syncStatusBadge(){
 function mainScreen(){
   const isTeacherRole = state.currentRole === 'teacher';
   const showStudentTitle = state.view==='test' && testForm.stage==='scoring' && testForm.studentName;
-  const title = 'اختبارات حفظ القرآن الكريم';
+  const title = 'إدارة مراكز تحفيظ القرآن الكريم';
   const examLocked = state.view==='test' && testForm.stage==='scoring';
   const currentView = effectiveView();
   const viewFn = currentView==='dashboard' ? dashboardView
@@ -4019,9 +4026,9 @@ function mainScreen(){
     : currentView==='stats' ? statsView
     : currentView==='students' ? studentsView
     : currentView==='schedule' ? teacherBookingView
-    : currentView==='memorization' ? memorizationView
+    : currentView==='memorization' ? (isTeacherRole ? memorizationView : memorizationAdminView)
     : currentView==='myStudents' ? myStudentsView
-    : currentView==='attendance' ? attendanceView
+    : currentView==='attendance' ? (isTeacherRole ? attendanceView : attendanceAdminView)
     : currentView==='finance' ? financeView
     : settingsView;
   return `
@@ -4035,22 +4042,23 @@ function mainScreen(){
   </div>
   <div class="content" id="content">
     ${currentView==='dashboard' ? backupReminderHTML() : ''}
+    ${examSubNavHTML(currentView)}
     ${viewFn()}
   </div>
   <div class="tabbar">
     ${isTeacherRole ? `
-    <button class="tab-btn ${currentView==='schedule'?'active':''}" data-view="schedule">${iconTest()}<span>حجز اختبار</span></button>
-    <button class="tab-btn ${currentView==='myStudents'?'active':''}" data-view="myStudents">${iconStudents()}<span>طلابي</span></button>
-    <button class="tab-btn ${currentView==='attendance'?'active':''}" data-view="attendance">${iconAttendance()}<span>الحضور</span></button>
+    <button class="tab-btn ${currentView==='dashboard'?'active':''}" data-view="dashboard">${iconDashboard()}<span>الرئيسية</span></button>
     <button class="tab-btn ${currentView==='memorization'?'active':''}" data-view="memorization">${iconBook()}<span>التحفيظ</span></button>
-    <button class="tab-btn ${currentView==='history'?'active':''}" data-view="history">${iconHistory()}<span>نتائج طلابي</span></button>
+    <button class="tab-btn ${currentView==='attendance'?'active':''}" data-view="attendance">${iconAttendance()}<span>الحضور</span></button>
+    <button class="tab-btn ${currentView==='myStudents'?'active':''}" data-view="myStudents">${iconStudents()}<span>طلابي</span></button>
+    <button class="tab-btn ${['schedule','history'].includes(currentView)?'active':''}" data-view="schedule">${iconTest()}<span>الاختبارات</span></button>
     <button class="tab-btn ${currentView==='settings'?'active':''}" data-view="settings">${iconSettings()}<span>الإعدادات</span></button>
     ` : `
-    <button class="tab-btn ${state.view==='dashboard'?'active':''} ${examLocked?'tab-locked':''}" data-view="dashboard">${iconDashboard()}<span>الرئيسية</span>${state.currentRole==='admin' && pendingStudentRequests().length ? `<i class="tab-badge">${pendingStudentRequests().length}</i>` : ''}</button>
-    <button class="tab-btn ${state.view==='test'?'active':''}" data-view="test">${iconTest()}<span>الاختبار</span></button>
-    <button class="tab-btn ${state.view==='history'?'active':''} ${examLocked?'tab-locked':''}" data-view="history">${iconHistory()}<span>السجل</span></button>
+    <button class="tab-btn ${state.view==='dashboard'?'active':''} ${examLocked?'tab-locked':''}" data-view="dashboard">${iconDashboard()}<span>الرئيسية</span>${state.currentRole==='admin' && pendingStudentRequests().length ? `<span class="tab-badge">${pendingStudentRequests().length}</span>` : ''}</button>
+    <button class="tab-btn ${state.view==='memorization'?'active':''} ${examLocked?'tab-locked':''}" data-view="memorization">${iconBook()}<span>التحفيظ</span></button>
+    <button class="tab-btn ${state.view==='attendance'?'active':''} ${examLocked?'tab-locked':''}" data-view="attendance">${iconAttendance()}<span>الحضور</span></button>
     <button class="tab-btn ${state.view==='students'?'active':''} ${examLocked?'tab-locked':''}" data-view="students">${iconStudents()}<span>الطلاب</span></button>
-    <button class="tab-btn ${state.view==='stats'?'active':''} ${examLocked?'tab-locked':''}" data-view="stats">${iconStats()}<span>إحصاءات</span></button>
+    <button class="tab-btn ${['test','history','stats'].includes(state.view)?'active':''}" data-view="test">${iconTest()}<span>الاختبارات</span></button>
     ${state.currentRole==='admin' ? `<button class="tab-btn ${state.view==='finance'?'active':''} ${examLocked?'tab-locked':''}" data-view="finance">${iconFinance()}<span>المالية</span></button>` : ''}
     <button class="tab-btn ${state.view==='settings'?'active':''} ${examLocked?'tab-locked':''}" data-view="settings">${iconSettings()}<span>الإعدادات</span></button>
     `}
@@ -4080,7 +4088,7 @@ function attachMainHandlers(){
     }
     doLogout();
   };
-  document.querySelectorAll('.tab-btn').forEach(b=>{
+  document.querySelectorAll('.tab-btn, .subtab').forEach(b=>{
     b.onclick = ()=>{
       if(state.view==='test' && testForm.stage==='scoring' && b.dataset.view !== 'test'){
         showToast('لازم تحفظ أو ترجع عن الاختبار الحالي قبل ما تتنقل لصفحة ثانية');
@@ -4101,9 +4109,9 @@ function attachMainHandlers(){
   if(currentView==='stats') attachStatsHandlers();
   if(currentView==='students') attachStudentsHandlers();
   if(currentView==='schedule') attachScheduleHandlers();
-  if(currentView==='memorization') attachMemorizationHandlers();
+  if(currentView==='memorization' && state.currentRole==='teacher') attachMemorizationHandlers();
   if(currentView==='myStudents') attachMyStudentsHandlers();
-  if(currentView==='attendance') attachAttendanceHandlers();
+  if(currentView==='attendance') { if(state.currentRole==='teacher') attachAttendanceHandlers(); else attachAdminAttendanceHandlers(); }
   if(currentView==='finance') attachFinanceHandlers();
   if(currentView==='settings') attachSettingsHandlers();
 }
@@ -6441,7 +6449,105 @@ async function exportDailyResultsPDF(btnEl){
 
 /* ---------------- STATS VIEW ---------------- */
 /* ---------------- DASHBOARD (نظرة عامة) — admin/examiner landing page ---------------- */
+/* ---------------- الرئيسية / التحفيظ / الحضور — the core of the program ---------------- */
+function mzPagesOf(m){ return Object.values(mzCoverageOf(m)).reduce((a,b)=>a+b, 0); }
+function homeData(teacher){
+  const today = localDateStamp();
+  const sess = state.memorization.filter(m=> !teacher || m.teacherName === teacher);
+  const todaySess = sess.filter(m=> localDateStamp(new Date(m.date)) === today);
+  const pages = Math.round(todaySess.filter(m=>m.type==='new').reduce((t,m)=> t + mzPagesOf(m), 0) * 10) / 10;
+  const names = teacher ? getTeacherStudentNames(teacher) : null;
+  const studs = state.students.filter(x=> !names || names.has(x.name.trim().toLowerCase()));
+  let p=0, a=0, e=0, u=0;
+  studs.forEach(st=>{ const r = attGet(st.name, today); if(!r) u++; else if(r.s==='p') p++; else if(r.s==='a') a++; else e++; });
+  const last = {};
+  sess.forEach(m=>{ const k = sreqKey(m.studentName), t = new Date(m.date).getTime(); if(!last[k] || t > last[k]) last[k] = t; });
+  const now = Date.now();
+  const late = studs.map(st=>{ const t = last[sreqKey(st.name)]; return { name: st.name, teacher: st.registeredByTeacher, days: t ? Math.floor((now - t)/86400000) : null }; })
+    .filter(x=> x.days === null || x.days >= 7)
+    .sort((x,y)=> (y.days === null ? 9999 : y.days) - (x.days === null ? 9999 : x.days));
+  return { today, sessions: todaySess.length, students: new Set(todaySess.map(m=>sreqKey(m.studentName))).size, pages, total: studs.length, att:{p,a,e,u}, late };
+}
+function todaySummaryHTML(teacher){
+  const h = homeData(teacher), isT = !!teacher;
+  return `
+  <div class="section-title">ملخص اليوم <span class="acc-meta">${escapeHtml(attDayName(h.today))}</span></div>
+  <div class="stat-row">
+    <div class="stat-card"><div class="stat-icon">${iconBook()}</div><div class="num">${h.pages}</div><div class="lbl">صفحات جديدة اليوم</div></div>
+    <div class="stat-card"><div class="stat-icon">${iconStudents()}</div><div class="num">${h.students}<small style="font-size:12px;color:var(--ink-soft);"> / ${h.total}</small></div><div class="lbl">طلاب سمّعوا اليوم</div></div>
+  </div>
+  <div class="settings-block">
+    <h3>حضور اليوم</h3>
+    <div class="att-summary"><span class="att-chip p">حاضر ${h.att.p}</span><span class="att-chip a">غائب ${h.att.a}</span><span class="att-chip e">مأذون ${h.att.e}</span><span class="att-chip u">لم يُسجَّل ${h.att.u}</span></div>
+    <div class="home-actions">
+      <button class="btn btn-primary" data-go="attendance">${isT ? 'تسجيل الحضور' : 'تفاصيل الحضور'}</button>
+      <button class="btn" data-go="memorization">${isT ? 'تسجيل تحفيظ' : 'متابعة التحفيظ'}</button>
+    </div>
+  </div>
+  <div class="settings-block">
+    <h3>طلاب متأخرون بالتسميع</h3>
+    <p style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">ما سُجّل لهم تحفيظ من 7 أيام أو أكثر</p>
+    ${h.late.length ? h.late.slice(0,8).map(x=>`<div class="backup-row"><span style="font-size:12.5px;">${escapeHtml(x.name)}${(!isT && x.teacher) ? `<br><span style="font-size:11px;color:var(--ink-soft);">${escapeHtml(x.teacher)}</span>` : ''}</span><span style="font-size:11px;color:var(--amber);">${x.days === null ? 'لم يُسجَّل له تحفيظ' : x.days + ' يوم'}</span></div>`).join('') + (h.late.length > 8 ? `<p style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">و ${h.late.length - 8} آخرين</p>` : '') : `<p style="font-size:12.5px;color:var(--green);">الكل منتظم بالتسميع 👍</p>`}
+  </div>`;
+}
+function teacherHomeHTML(){
+  const me = state.currentTeacherLink;
+  const month = currentYearMonth();
+  const mine = getTeacherStudentNames(me);
+  const monthly = [...mine].reduce((t,n)=> t + getMonthlyNewPageCount(n, month, me), 0);
+  const upcoming = state.schedule.filter(x=>!x.done && x.teacherName===me && (new Date(x.date) - new Date())/86400000 >= -0.5 && (new Date(x.date) - new Date())/86400000 <= 7).sort((a,b)=> new Date(a.date)-new Date(b.date));
+  return `
+  ${teacherRequestsCardHTML()}
+  ${todaySummaryHTML(me)}
+  <div class="settings-block">
+    <h3>هذا الشهر</h3>
+    <p style="font-size:13px;color:var(--ink-soft);">مجموع الصفحات الجديدة لطلابك: <b style="color:var(--green);">${Math.round(monthly*10)/10}</b></p>
+  </div>
+  ${upcoming.length ? `<div class="settings-block"><h3>اختبارات طلابك القادمة</h3>${upcoming.slice(0,5).map(x=>`<div class="backup-row"><span style="font-size:12.5px;">${escapeHtml(x.studentName)}</span><span style="font-size:11px;color:var(--ink-soft);">${new Date(x.date).toLocaleDateString('ar-EG',{weekday:'long',day:'numeric',month:'short'})}</span></div>`).join('')}<button class="link-btn" data-go="schedule" style="margin-top:8px;">قسم الاختبارات ›</button></div>` : ''}`;
+}
+function memorizationAdminView(){
+  const ym = currentYearMonth(), now = Date.now();
+  const teachers = TEACHERS.slice().sort((a,b)=>a.localeCompare(b,'ar'));
+  const rows = teachers.map(t=>{
+    const sess = state.memorization.filter(m=>m.teacherName===t);
+    const monthSess = sess.filter(m=>m.date.startsWith(ym));
+    const names = getTeacherStudentNames(t);
+    const pages = Math.round([...names].reduce((sum,n)=> sum + getMonthlyNewPageCount(n, ym, t), 0) * 10) / 10;
+    const lastT = sess.reduce((mx,m)=> Math.max(mx, new Date(m.date).getTime()), 0);
+    const days = lastT ? Math.floor((now - lastT)/86400000) : null;
+    return { t, sessions: monthSess.length, students: state.students.filter(x=>x.registeredByTeacher===t).length, pages, days };
+  });
+  const recent = state.memorization.slice().sort((a,b)=> new Date(b.date)-new Date(a.date)).slice(0,15);
+  return `
+  <div class="section-title">متابعة التحفيظ <span class="acc-meta">${escapeHtml(finMonthLabel(ym))}</span></div>
+  <div class="stat-row">
+    <div class="stat-card"><div class="num">${rows.reduce((a,r)=>a+r.sessions,0)}</div><div class="lbl">جلسات هذا الشهر</div></div>
+    <div class="stat-card"><div class="num">${Math.round(rows.reduce((a,r)=>a+r.pages,0)*10)/10}</div><div class="lbl">صفحات جديدة</div></div>
+  </div>
+  <div class="settings-block"><h3>الحلقات (المحفّظون)</h3>
+    ${rows.length ? rows.map(r=>`<div class="mz-trow">
+      <div class="mz-thead"><b>${escapeHtml(r.t)}</b>${halaqaBadgeHTML(r.t)}</div>
+      <div class="mz-tmeta"><span>${r.students} طالب</span><span>${r.sessions} جلسة</span><span>${r.pages} صفحة</span><span style="color:${r.days===null||r.days>=7?'var(--amber)':'var(--green)'};">${r.days===null ? 'ما سجّل' : (r.days===0 ? 'اليوم' : 'قبل ' + r.days + ' يوم')}</span></div>
+    </div>`).join('') : '<p style="font-size:12.5px;color:var(--ink-soft);">ما في محفّظين.</p>'}
+  </div>
+  <div class="settings-block"><h3>آخر الجلسات</h3>
+    ${recent.length ? recent.map(m=>`<div class="backup-row"><span style="font-size:12.5px;">${escapeHtml(m.studentName)}<br><span style="font-size:11px;color:var(--ink-soft);">${escapeHtml(m.teacherName||'—')} · ${m.type==='new' ? 'حفظ جديد' : 'مراجعة'}</span></span><span style="font-size:11px;color:var(--ink-soft);">${new Date(m.date).toLocaleDateString('ar-EG',{day:'numeric',month:'short'})}</span></div>`).join('') : '<p style="font-size:12.5px;color:var(--ink-soft);">ما في جلسات مسجّلة بعد.</p>'}
+  </div>`;
+}
+function attendanceAdminView(){
+  if(!attAdminDate) attAdminDate = localDateStamp();
+  return `<div class="section-title">الحضور والغياب</div>${attendanceAdminCardHTML()}`;
+}
+/* Exams are a secondary section: one tab, with a small switcher inside it. */
+function examSubNavHTML(currentView){
+  const isT = state.currentRole === 'teacher';
+  const items = isT ? [['schedule','حجز اختبار'],['history','نتائج طلابي']] : [['test','إجراء اختبار'],['history','السجل'],['stats','إحصاءات']];
+  if(!items.some(i=>i[0]===currentView)) return '';
+  return `<div class="sc-tabs subtabs">${items.map(([v,l])=>`<button type="button" class="subtab ${currentView===v?'on':''}" data-view="${v}">${l}</button>`).join('')}</div>`;
+}
+
 function dashboardView(){
+  if(state.currentRole === 'teacher') return teacherHomeHTML();
   const todayStr = todayStamp();
   const todayExamsCount = visibleExams().filter(e => e.date.slice(0,10) === todayStr).length;
 
@@ -6467,9 +6573,10 @@ function dashboardView(){
   }).filter(t => t.daysSince === null || t.daysSince >= INACTIVE_DAYS);
 
   return `
-  <div class="section-title">نظرة عامة</div>
   ${adminRequestsCardHTML()}
+  ${todaySummaryHTML(null)}
 
+  <div class="section-title" style="margin-top:18px;">الاختبارات</div>
   <div class="stat-row">
     <div class="stat-card"><div class="stat-icon">${iconTest()}</div><div class="num">${todayExamsCount}</div><div class="lbl">اختبارات اليوم</div></div>
     <div class="stat-card"><div class="stat-icon">${iconCalendarSvg()}</div><div class="num">${upcomingWeek.length}</div><div class="lbl">مواعيد الأسبوع الجاي</div></div>
@@ -6508,6 +6615,7 @@ function dashboardView(){
 
 function attachDashboardHandlers(){
   attachRequestHandlers();
+  document.querySelectorAll('[data-go]').forEach(b=> b.onclick = ()=>{ state.view = b.dataset.go; render(); });
   const scheduleBtn = document.getElementById('btn-dash-view-schedule');
   if(scheduleBtn) scheduleBtn.onclick = ()=>{ state.view = 'students'; render(); };
   const studentsBtn = document.getElementById('btn-dash-view-students');
@@ -6556,7 +6664,6 @@ function statsView(){
   return `
   <div class="section-title">الإحصاءات</div>
   ${halaqaStatsCardHTML()}
-  ${attendanceAdminCardHTML()}
 
   <div class="stat-row">
     <div class="stat-card"><div class="num">${state.students.length}</div><div class="lbl">إجمالي الطلاب المسجّلين</div></div>
@@ -6677,7 +6784,6 @@ function statsView(){
 }
 
 function attachStatsHandlers(){
-  attachAdminAttendanceHandlers();
   const monthInput = document.getElementById('stats-report-month');
   const btn = document.getElementById('btn-monthly-report-stats');
   if(btn) btn.onclick = ()=> generateMonthlyReport(btn, 'month', monthInput ? monthInput.value : currentYearMonth());
