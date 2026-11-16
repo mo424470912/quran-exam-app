@@ -789,6 +789,24 @@ html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
 .fin-meta{ font-size:11.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .fin-amt{ flex:none; font-weight:900; font-size:15px; direction:ltr; } .fin-amt.in{ color:#2E7D5B; } .fin-amt.out{ color:#B3392F; }
 .fin-acts{ flex:none; display:flex; gap:2px; } .fin-acts button{ border:none; background:none; font-size:16px; cursor:pointer; padding:4px; }
+.teacher-manage-row{ flex-wrap:wrap; }
+.tm-halaqa{ flex:1 1 100%; display:flex; gap:8px; margin-top:6px; }
+.tm-halaqa select{ flex:1; min-width:0; padding:8px; font-size:13px; }
+.halaqa-badge{ display:inline-block; font-size:11.5px; font-weight:800; color:var(--hc); border:1.5px solid var(--hc); border-radius:20px; padding:2px 9px; }
+.hq-group{ border-right:4px solid var(--hc); background:var(--paper); border-radius:10px; padding:8px 10px; margin-bottom:8px; }
+.hq-group-head{ display:flex; justify-content:space-between; gap:8px; font-size:13.5px; margin-bottom:4px; } .hq-group-head span{ color:var(--ink-soft); font-size:12px; white-space:nowrap; }
+.hq-type-row{ display:flex; justify-content:space-between; font-size:12.5px; padding:3px 0; color:var(--ink-soft); border-top:1px dashed var(--line); }
+.super-content{ padding-bottom:40px; }
+.super-header{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.super-header button{ font-size:12px; padding:6px 12px; }
+.super-banner{ position:sticky; top:0; z-index:60; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 12px; background:#8A5F10; color:#fff; font-size:13px; font-weight:800; }
+.super-banner button{ border:none; border-radius:10px; background:#fff; color:#8A5F10; padding:6px 12px; font-family:'Tajawal'; font-weight:800; cursor:pointer; }
+.center-card{ border:1.5px solid var(--line); border-radius:16px; padding:12px; margin-bottom:12px; background:var(--paper); }
+.center-card-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; font-size:16px; }
+.center-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+.center-grid div{ text-align:center; background:var(--cream,#FBF4E2); border-radius:10px; padding:6px 2px; }
+.center-grid span{ display:block; font-size:11px; color:var(--ink-soft); } .center-grid b{ font-size:16px; }
+.center-link{ display:flex; gap:6px; margin-bottom:10px; } .center-link input{ flex:1; min-width:0; font-size:11px; direction:ltr; } .center-link button{ font-size:12px; white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -1008,6 +1026,29 @@ function withTimeout(promise, ms){
   ]);
 }
 
+/* ---------------- Multi-center ----------------
+   One Firebase project serves many independent centers. The default center
+   ('main' — the original مركز السيد هاشم) keeps its documents exactly where
+   they were (quran_app/exams …); every other center's documents live beside
+   them with a prefix (quran_app/<id>__exams …). A person always works inside
+   the center on their own account; the quran-file supervisor (role 'super')
+   can open any center in read-only mode and sees the combined dashboard. */
+let CENTER_ID = 'main';
+(function(){
+  try{
+    const c = (new URLSearchParams(location.search).get('c') || '').toLowerCase();
+    if(/^[a-z0-9-]{2,30}$/.test(c) && c !== 'main') CENTER_ID = c;
+  }catch(e){}
+})();
+const URL_CENTER_ID = CENTER_ID; // the center named in the link (used for registration + login-screen branding)
+function dk(key){ return CENTER_ID === 'main' ? key : CENTER_ID + '__' + key; }
+function dkFor(id, key){ return id === 'main' ? key : id + '__' + key; }
+function logicalKey(docKey){
+  if(CENTER_ID === 'main') return docKey.includes('__') ? null : docKey;
+  return docKey.startsWith(CENTER_ID + '__') ? docKey.slice(CENTER_ID.length + 2) : null;
+}
+function qdocRef(key){ return qdocRef(dk(key)); }
+
 const lastLocalWrite = {}; // key -> ms timestamp of the last save made on THIS device
 
 const storageAdapter = {
@@ -1025,11 +1066,11 @@ const storageAdapter = {
       // through to the slower server-or-cache attempt below.
       try{
         const cacheDoc = await withTimeout(
-          firestoreDb.collection('quran_app').doc(key).get({ source: 'cache' }),
+          qdocRef(key).get({ source: 'cache' }),
           3000
         );
         if(cacheDoc.exists){
-          try{ localStorage.setItem(key, cacheDoc.data().value); }catch(e){}
+          try{ localStorage.setItem(dk(key), cacheDoc.data().value); }catch(e){}
           return { value: cacheDoc.data().value };
         }
       }catch(e){ /* nothing cached yet (or cache unsupported) — fall through */ }
@@ -1044,9 +1085,9 @@ const storageAdapter = {
       // that gave up too early, not actually missing data.
       for(let attempt=1; attempt<=2; attempt++){
         try{
-          const doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get(), 12000);
+          const doc = await withTimeout(qdocRef(key).get(), 12000);
           if(doc.exists){
-            try{ localStorage.setItem(key, doc.data().value); }catch(e){}
+            try{ localStorage.setItem(dk(key), doc.data().value); }catch(e){}
             return { value: doc.data().value };
           }
           return null;
@@ -1060,12 +1101,14 @@ const storageAdapter = {
     if (window.storage && typeof window.storage.get === 'function') {
       return await window.storage.get(key, true);
     }
-    const value = localStorage.getItem(key);
+    const value = localStorage.getItem(dk(key));
     return value === null ? null : { value };
   },
   async set(key, value){
+    // A supervisor looking at another center is read-only: nothing is saved.
+    if(state.superViewing){ showToast('وضع الاطلاع فقط — التعديل غير متاح'); return { ok:false }; }
     // Always keep an immediate local backup, regardless of connectivity.
-    try{ localStorage.setItem(key, value); }catch(e){}
+    try{ localStorage.setItem(dk(key), value); }catch(e){}
     if (firestoreDb) {
       // Mark this key as "not yet confirmed synced" BEFORE attempting the
       // write. We don't rely solely on Firestore's own offline queue to
@@ -1075,10 +1118,10 @@ const storageAdapter = {
       // independent list in plain localStorage; flushPendingSync()
       // retries anything still marked pending, on every app start and
       // every time connectivity returns.
-      markPendingSync(key);
+      markPendingSync(dk(key));
       lastLocalWrite[key] = Date.now();
-      firestoreDb.collection('quran_app').doc(key).set({ value })
-        .then(() => clearPendingSync(key))
+      qdocRef(key).set({ value })
+        .then(() => clearPendingSync(dk(key)))
         .catch(e => console.warn('لم يتم رفع البيانات بعد لقاعدة البيانات — راح تترفع تلقائياً لما يتوفر إنترنت', e));
       return { ok: true };
     }
@@ -1127,7 +1170,7 @@ async function flushPendingSync(){
     try{
       const raw = localStorage.getItem(key);
       if(raw === null){ clearPendingSync(key); return false; } // nothing local to send
-      const outRaw = await mergeBeforeFlush(key, raw);
+      const outRaw = await mergeBeforeFlush(logicalKey(key), raw);
       await withTimeout(firestoreDb.collection('quran_app').doc(key).set({ value: outRaw }), 8000);
       clearPendingSync(key);
       return true;
@@ -1185,6 +1228,28 @@ function showToast(msg){
      collection (username/role/disabled — never passwords).
    - Legacy mode (no Firebase configured): state.accounts comes from the
      old single localStorage/window.storage document, same as before. */
+/* Sets which center the signed-in person works in, from their profile. */
+function applyCenterFromProfile(p){
+  state.realRole = p.role || 'examiner';
+  state.superViewing = false;
+  CENTER_ID = state.realRole === 'super' ? 'main' : (p.centerId || 'main');
+}
+function resetCenterState(){
+  Object.assign(state, { exams:[], students:[], schedule:[], notifications:[], memorization:[], importBatches:[], trash:[], studentRequests:[], attendance:{}, attIndex:[], finance:{}, finIndex:[], centerSettings:null });
+  finLoadedAll = false; finMonth = null; attDate = null; attAdminDate = null;
+}
+function isSuperHome(){ return state.currentRole === 'super' && !state.superViewing; }
+function scopeAccounts(list){
+  return (list || []).filter(a => a.role !== 'super' && (a.centerId || 'main') === CENTER_ID);
+}
+async function loadPublicCenter(){
+  if(!firestoreDb || CENTER_ID === 'main'){ state.publicCenter = null; return; }
+  try{
+    const d = await withTimeout(firestoreDb.collection('centers').doc(CENTER_ID).get(), 6000);
+    state.publicCenter = d.exists ? d.data() : null;
+  }catch(e){ state.publicCenter = null; }
+}
+
 async function loadAppData(){
   // Critical ordering: push any not-yet-confirmed local writes from a
   // previous offline session BEFORE reading anything from the server.
@@ -1193,7 +1258,14 @@ async function loadAppData(){
   // destroying real results that were only ever saved locally. This is
   // the fix for "tested students all week offline, then the data never
   // showed up once back online."
+  if(isSuperHome()){
+    try{ await loadAccountsFromFirestore(); }catch(e){}
+    state.loading = false; render();
+    if(!state.superData) loadSuperData();
+    return;
+  }
   await flushPendingSync();
+  await loadPublicCenter();
 
   // These seven keys are independent documents, so fetch them all at
   // once instead of one after another — previously each await'ed
@@ -1311,12 +1383,12 @@ async function syncFromServer(manual){
       [STORAGE_STUDENT_REQUESTS,'studentRequests'],
     ];
     await Promise.all(keys.map(async ([key, prop])=>{
-      if(pend.has(key)) return;
+      if(pend.has(dk(key))) return;
       let doc;
-      try{ doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 12000); }
+      try{ doc = await withTimeout(qdocRef(key).get({ source:'server' }), 12000); }
       catch(e){ return; }
       if(!doc.exists) return;
-      if(getPendingSyncKeys().includes(key)) return;
+      if(getPendingSyncKeys().includes(dk(key))) return;
       const val = doc.data().value;
       if(key === STORAGE_STUDENT_REQUESTS){
         // Approval requests are merged item-by-item (newest edit wins) so two people
@@ -1326,48 +1398,48 @@ async function syncFromServer(manual){
         const merged = sreqMerge(state.studentRequests, srv);
         if(JSON.stringify(merged) !== JSON.stringify(state.studentRequests)){
           state.studentRequests = merged;
-          try{ localStorage.setItem(key, JSON.stringify(merged)); }catch(e){}
+          try{ localStorage.setItem(dk(key), JSON.stringify(merged)); }catch(e){}
           changed = true;
         }
         return;
       }
       if((lastLocalWrite[key]||0) >= started) return;      // saved here meanwhile — ours is newer
-      let cur = null; try{ cur = localStorage.getItem(key); }catch(e){}
+      let cur = null; try{ cur = localStorage.getItem(dk(key)); }catch(e){}
       if(cur === val) return;
       let parsed; try{ parsed = JSON.parse(val); }catch(e){ return; }
       if(prop==='centerSettings'){ if(!parsed || typeof parsed!=='object') return; }
       else if(!Array.isArray(parsed)) return;
       state[prop] = parsed;
-      try{ localStorage.setItem(key, val); }catch(e){}
+      try{ localStorage.setItem(dk(key), val); }catch(e){}
       changed = true;
     }));
     for(const m of Object.keys(state.attendance)){
       const key = STORAGE_ATT_PREFIX + m;
-      if(pend.has(key) || getPendingSyncKeys().includes(key)) continue;
+      if(pend.has(dk(key)) || getPendingSyncKeys().includes(dk(key))) continue;
       let doc;
-      try{ doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 10000); }catch(e){ continue; }
+      try{ doc = await withTimeout(qdocRef(key).get({ source:'server' }), 10000); }catch(e){ continue; }
       if(!doc.exists) continue;
       let srv; try{ srv = JSON.parse(doc.data().value); }catch(e){ continue; }
       if(!Array.isArray(srv)) continue;
       const merged = attMerge(state.attendance[m], srv);
       if(JSON.stringify(merged) !== JSON.stringify(state.attendance[m])){
         state.attendance[m] = merged;
-        try{ localStorage.setItem(key, JSON.stringify(merged)); }catch(e){}
+        try{ localStorage.setItem(dk(key), JSON.stringify(merged)); }catch(e){}
         changed = true;
       }
     }
     for(const m of Object.keys(state.finance)){
       const key = STORAGE_FIN_PREFIX + m;
-      if(pend.has(key) || getPendingSyncKeys().includes(key)) continue;
+      if(pend.has(dk(key)) || getPendingSyncKeys().includes(dk(key))) continue;
       let doc;
-      try{ doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 10000); }catch(e){ continue; }
+      try{ doc = await withTimeout(qdocRef(key).get({ source:'server' }), 10000); }catch(e){ continue; }
       if(!doc.exists) continue;
       let srv; try{ srv = JSON.parse(doc.data().value); }catch(e){ continue; }
       if(!Array.isArray(srv)) continue;
       const merged = finMerge(state.finance[m], srv);
       if(JSON.stringify(merged) !== JSON.stringify(state.finance[m])){
         state.finance[m] = merged;
-        try{ localStorage.setItem(key, JSON.stringify(merged)); }catch(e){}
+        try{ localStorage.setItem(dk(key), JSON.stringify(merged)); }catch(e){}
         changed = true;
       }
     }
@@ -1431,9 +1503,11 @@ async function loadAccountsFromFirestore(forceServer){
     }catch(e){
       snap = await withTimeout(firestoreDb.collection('users').get(forceServer ? { source: 'server' } : undefined), forceServer ? 10000 : 5000);
     }
-    state.accounts = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    const allAcc = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+    state.allAccounts = allAcc;
+    state.accounts = scopeAccounts(allAcc);
     accountsLoadFailed = false;
-    try{ localStorage.setItem('cached_accounts', JSON.stringify(state.accounts)); }catch(e){}
+    try{ localStorage.setItem('cached_accounts', JSON.stringify(allAcc)); }catch(e){}
   }catch(e){
     console.warn('تعذّر تحميل قائمة الحسابات من الخادم — استخدام آخر نسخة محفوظة محلياً', e);
     // Offline (or a slow connection) with the local Firestore cache not
@@ -1443,7 +1517,7 @@ async function loadAccountsFromFirestore(forceServer){
     // like "no accounts exist" and could show the wrong screen.
     try{
       const cached = localStorage.getItem('cached_accounts');
-      if(cached) state.accounts = JSON.parse(cached);
+      if(cached) state.accounts = scopeAccounts(JSON.parse(cached));
     }catch(e2){}
     accountsLoadFailed = true;
   }
@@ -1764,7 +1838,7 @@ function sreqPurge(){
 async function saveStudentRequests(){
   if(firestoreDb && navigator.onLine){
     try{
-      const doc = await withTimeout(firestoreDb.collection('quran_app').doc(STORAGE_STUDENT_REQUESTS).get({ source:'server' }), 4000);
+      const doc = await withTimeout(qdocRef(STORAGE_STUDENT_REQUESTS).get({ source:'server' }), 4000);
       if(doc.exists){
         const srv = JSON.parse(doc.data().value);
         if(Array.isArray(srv)) state.studentRequests = sreqMerge(state.studentRequests, srv);
@@ -1951,7 +2025,7 @@ async function attLoadAll(){
 async function attSaveMonth(m, noMerge){
   if(!noMerge && firestoreDb && navigator.onLine){
     try{
-      const doc = await withTimeout(firestoreDb.collection('quran_app').doc(STORAGE_ATT_PREFIX + m).get({ source:'server' }), 4000);
+      const doc = await withTimeout(qdocRef(STORAGE_ATT_PREFIX + m).get({ source:'server' }), 4000);
       if(doc.exists){ const srv = JSON.parse(doc.data().value); if(Array.isArray(srv)) state.attendance[m] = attMerge(state.attendance[m], srv); }
     }catch(e){}
   }
@@ -1964,11 +2038,12 @@ async function attSaveMonth(m, noMerge){
 /* Before a queued (offline) write goes out, merge it with what the server
    has now, so reconnecting never wipes records other people added. */
 async function mergeBeforeFlush(key, raw){
+  if(!key) return raw;
   const isFin = key.startsWith(STORAGE_FIN_PREFIX), isFinIx = key === STORAGE_FIN_INDEX;
   const isAtt = key.startsWith(STORAGE_ATT_PREFIX), isReq = key === STORAGE_STUDENT_REQUESTS, isIx = key === STORAGE_ATT_INDEX;
   if(!(isAtt || isReq || isIx || isFin || isFinIx)) return raw;
   try{
-    const doc = await withTimeout(firestoreDb.collection('quran_app').doc(key).get({ source:'server' }), 5000);
+    const doc = await withTimeout(qdocRef(key).get({ source:'server' }), 5000);
     if(!doc.exists) return raw;
     const srv = JSON.parse(doc.data().value), loc = JSON.parse(raw);
     if(!Array.isArray(srv) || !Array.isArray(loc)) return raw;
@@ -1979,7 +2054,7 @@ async function mergeBeforeFlush(key, raw){
     else if(isReq){ merged = sreqMerge(loc, srv); state.studentRequests = merged; }
     else { merged = [...new Set([...loc, ...srv])].sort(); state.attIndex = merged; }
     const out = JSON.stringify(merged);
-    try{ localStorage.setItem(key, out); }catch(e){}
+    try{ localStorage.setItem(dk(key), out); }catch(e){}
     return out;
   }catch(e){ return raw; }
 }
@@ -2187,7 +2262,7 @@ async function finLoadAll(){
 async function finSaveMonth(m, noMerge){
   if(!noMerge && firestoreDb && navigator.onLine){
     try{
-      const doc = await withTimeout(firestoreDb.collection('quran_app').doc(STORAGE_FIN_PREFIX + m).get({ source:'server' }), 4000);
+      const doc = await withTimeout(qdocRef(STORAGE_FIN_PREFIX + m).get({ source:'server' }), 4000);
       if(doc.exists){ const srv = JSON.parse(doc.data().value); if(Array.isArray(srv)) state.finance[m] = finMerge(state.finance[m], srv); }
     }catch(e){}
   }
@@ -2531,6 +2606,225 @@ function openWhatsApp(digits, text){
   try{ w = window.open(url, '_blank'); }catch(e){}
   if(!w) location.href = url;
 }
+/* ---------------- Halaqa classification (تصنيف الحلقات) ----------------
+   Each teacher runs one halaqa; the admin classifies it in Settings → المحفّظون.
+   Stored in centerSettings.halaqat = { teacherName: { cat, type } }.        */
+const HALAQA_CATS = {
+  dar:    { label: 'حلقات دار القرآن الكريم والسنة', short: 'دار القرآن الكريم والسنة', color: '#1B6B4A' },
+  awqaf:  { label: 'حلقات وزارة الأوقاف والشؤون الدينية', short: 'وزارة الأوقاف', color: '#8A5F10' },
+  center: { label: 'حلقات متطوعة / تابعة للمركز', short: 'متطوعة / المركز', color: '#2F5D9B' },
+};
+const HALAQA_TYPES = {
+  dar:    [['kafala','مكفولة'], ['tathbeet','تثبيت']],
+  awqaf:  [['kafala','مكفولة'], ['tathbeet','تثبيت']],
+  center: [['talqeen','تلقين'], ['tasmee','تسميع'], ['tathbeet','تثبيت'], ['istiaab','استيعاب']],
+};
+function halaqaOf(teacher){
+  const h = (state.centerSettings && state.centerSettings.halaqat && state.centerSettings.halaqat[teacher]) || null;
+  if(!h || !HALAQA_CATS[h.cat]) return null;
+  const t = (HALAQA_TYPES[h.cat].find(x=>x[0]===h.type) || [])[1] || '';
+  return { cat: h.cat, type: h.type || '', catLabel: HALAQA_CATS[h.cat].short, typeLabel: t, color: HALAQA_CATS[h.cat].color };
+}
+function halaqaBadgeHTML(teacher){
+  const h = halaqaOf(teacher);
+  return h ? `<span class="halaqa-badge" style="--hc:${h.color}">${escapeHtml(h.catLabel)}${h.typeLabel ? ' · ' + escapeHtml(h.typeLabel) : ''}</span>` : '';
+}
+function halaqaPickerHTML(teacher){
+  const h = (state.centerSettings.halaqat || {})[teacher] || {};
+  return `<div class="tm-halaqa">
+    <select class="plain-input hq-cat" data-name="${escapeHtml(teacher)}">
+      <option value="">— التصنيف —</option>
+      ${Object.entries(HALAQA_CATS).map(([k,v])=>`<option value="${k}" ${h.cat===k?'selected':''}>${escapeHtml(v.label)}</option>`).join('')}
+    </select>
+    <select class="plain-input hq-type" data-name="${escapeHtml(teacher)}" ${h.cat ? '' : 'disabled'}>
+      <option value="">— نوع الحلقة —</option>
+      ${(HALAQA_TYPES[h.cat] || []).map(([k,l])=>`<option value="${k}" ${h.type===k?'selected':''}>${l}</option>`).join('')}
+    </select>
+  </div>`;
+}
+function halaqaStatsCardHTML(){
+  const groups = {}; let none = { teachers:0, students:0 };
+  TEACHERS.forEach(t=>{
+    const h = halaqaOf(t), n = state.students.filter(x=>x.registeredByTeacher===t).length;
+    if(!h){ none.teachers++; none.students += n; return; }
+    const g = groups[h.cat] = groups[h.cat] || { teachers:0, students:0, types:{} };
+    g.teachers++; g.students += n;
+    const tl = h.typeLabel || 'غير محدد'; const ty = g.types[tl] = g.types[tl] || { teachers:0, students:0 };
+    ty.teachers++; ty.students += n;
+  });
+  const cats = Object.keys(HALAQA_CATS).filter(k=>groups[k]);
+  if(!cats.length && !none.teachers) return '';
+  return `<div class="settings-block">
+    <h3>الحلقات حسب التصنيف</h3>
+    ${cats.map(k=>{ const g = groups[k]; return `
+      <div class="hq-group" style="--hc:${HALAQA_CATS[k].color}">
+        <div class="hq-group-head"><b>${escapeHtml(HALAQA_CATS[k].label)}</b><span>${g.teachers} حلقة · ${g.students} طالب</span></div>
+        ${Object.entries(g.types).map(([tl,v])=>`<div class="hq-type-row"><span>${escapeHtml(tl)}</span><span>${v.teachers} حلقة · ${v.students} طالب</span></div>`).join('')}
+      </div>`; }).join('')}
+    ${none.teachers ? `<p style="font-size:12px;color:var(--ink-soft);margin-top:8px;">${none.teachers} محفّظ بدون تصنيف (${none.students} طالب) — صنّفهم من الإعدادات ← المحفّظون.</p>` : ''}
+  </div>`;
+}
+
+/* ---------------- Supervisor (مسؤول ملف القرآن والحلقات) ----------------
+   Sees every center: combined dashboard, halaqa classification totals, and
+   can open any center read-only (finance included). Can add new centers. */
+function centerLink(id){ const u = location.origin + location.pathname; return id === 'main' ? u : u + '?c=' + id; }
+async function loadSuperData(){
+  if(!firestoreDb) return;
+  state.superData = { loading:true, centers:[] }; if(isSuperHome()) render();
+  const cur = localDateStamp().slice(0,7);
+  const names = { main: null };
+  try{ const sn = await firestoreDb.collection('centers').get(); sn.forEach(d=>{ names[d.id] = d.data().name || d.id; }); }catch(e){}
+  let users = [];
+  try{ const sn = await firestoreDb.collection('users').get(); users = sn.docs.map(d=>({ uid:d.id, ...d.data() })); }catch(e){}
+  const rd = async (id, key)=>{
+    try{
+      const d = await withTimeout(firestoreDb.collection('quran_app').doc(dkFor(id, key)).get({ source:'server' }), 12000);
+      return d.exists ? JSON.parse(d.data().value) : null;
+    }catch(e){ return null; }
+  };
+  const out = await Promise.all(Object.keys(names).map(async id=>{
+    const [st, ex, cs, att, fin] = await Promise.all([rd(id,'students'), rd(id,'exams'), rd(id,'centerSettings'), rd(id,'att_'+cur), rd(id,'fin_'+cur)]);
+    const students = Array.isArray(st) ? st : [], exams = Array.isArray(ex) ? ex : [], set = cs && typeof cs==='object' ? cs : {};
+    const teachers = Array.isArray(set.teachers) ? set.teachers : (id==='main' ? TEACHERS_DEFAULT : []);
+    const halaqat = set.halaqat || {};
+    const a = { p:0, a:0, e:0 }; (Array.isArray(att) ? att : []).forEach(r=>{ if(a[r.s] !== undefined) a[r.s]++; });
+    let inc = 0, outc = 0; (Array.isArray(fin) ? fin : []).forEach(r=>{ if(r.x) return; if(r.t==='in') inc += r.a; else outc += r.a; });
+    const accs = users.filter(u=> u.role!=='super' && (u.centerId||'main')===id);
+    const hq = {};
+    teachers.forEach(t=>{
+      const h = halaqat[t]; const n = students.filter(x=>x.registeredByTeacher===t).length;
+      const key = h && HALAQA_CATS[h.cat] ? h.cat + '|' + (h.type||'') : 'none|';
+      const g = hq[key] = hq[key] || { teachers:0, students:0 }; g.teachers++; g.students += n;
+    });
+    return {
+      id, name: set.name || names[id] || (id==='main' ? CENTER_NAME_DEFAULT : id),
+      students: students.length, teachers: teachers.length,
+      examsTotal: exams.length, examsMonth: exams.filter(e=> (e.date||'').slice(0,7)===cur).length,
+      att: a, fin: { inc, out: outc, net: inc - outc }, accounts: accs.length, pending: accs.filter(u=>u.disabled).length, hq,
+    };
+  }));
+  out.sort((x,y)=> x.id==='main' ? -1 : y.id==='main' ? 1 : x.name.localeCompare(y.name,'ar'));
+  state.superData = { loading:false, centers: out, month: cur, at: new Date() };
+  if(isSuperHome()) render();
+}
+function hqLabel(key){
+  const [cat, type] = key.split('|');
+  if(cat === 'none') return 'بدون تصنيف';
+  const tl = (HALAQA_TYPES[cat].find(x=>x[0]===type) || [])[1];
+  return HALAQA_CATS[cat].short + (tl ? ' — ' + tl : '');
+}
+function superScreen(){
+  const d = state.superData;
+  const cs = getCenterSettings();
+  let body = '';
+  if(!d || d.loading){
+    body = `<div class="loading-screen" style="min-height:240px;"><div class="spinner"></div><div style="color:var(--ink-soft);font-size:13px;">جاري جمع بيانات المراكز...</div></div>`;
+  } else {
+    const sum = f => d.centers.reduce((t,c)=> t + f(c), 0);
+    const hq = {}; d.centers.forEach(c=> Object.entries(c.hq).forEach(([k,v])=>{ const g = hq[k] = hq[k] || { teachers:0, students:0 }; g.teachers += v.teachers; g.students += v.students; }));
+    const hqKeys = Object.keys(hq).sort((a,b)=> (a.startsWith('none')?1:0) - (b.startsWith('none')?1:0) || a.localeCompare(b));
+    body = `
+    <div class="fin-cards" style="grid-template-columns:repeat(2,1fr);">
+      <div class="fin-card"><div class="lbl">المراكز</div><div class="val" style="color:var(--green);">${d.centers.length}</div></div>
+      <div class="fin-card"><div class="lbl">الطلاب</div><div class="val" style="color:var(--green);">${sum(c=>c.students)}</div></div>
+      <div class="fin-card"><div class="lbl">المحفّظون (الحلقات)</div><div class="val" style="color:var(--green);">${sum(c=>c.teachers)}</div></div>
+      <div class="fin-card"><div class="lbl">اختبارات هذا الشهر</div><div class="val" style="color:var(--green);">${sum(c=>c.examsMonth)}</div></div>
+    </div>
+    <div class="settings-block"><h3>الحلقات حسب التصنيف (كل المراكز)</h3>
+      ${hqKeys.length ? hqKeys.map(k=>`<div class="hq-type-row"><span>${escapeHtml(hqLabel(k))}</span><span>${hq[k].teachers} حلقة · ${hq[k].students} طالب</span></div>`).join('') : '<p style="font-size:12px;color:var(--ink-soft);">ما في حلقات مصنّفة بعد.</p>'}
+    </div>
+    <div class="section-title" style="font-size:16px;">المراكز</div>
+    ${d.centers.map(c=>{
+      const marked = c.att.p + c.att.a + c.att.e;
+      return `<div class="center-card">
+        <div class="center-card-head"><b>${escapeHtml(c.name)}</b>${c.pending ? `<span class="tab-badge" style="position:static;">${c.pending} حساب بانتظار التفعيل</span>` : ''}</div>
+        <div class="center-grid">
+          <div><span>الطلاب</span><b>${c.students}</b></div>
+          <div><span>المحفّظون</span><b>${c.teachers}</b></div>
+          <div><span>اختبارات الشهر</span><b>${c.examsMonth}</b></div>
+          <div><span>الحضور هذا الشهر</span><b>${marked ? Math.round(c.att.p/marked*100) + '%' : '—'}</b></div>
+          <div><span>صافي مالية الشهر</span><b style="direction:ltr;color:${c.fin.net<0?'#B3392F':'#2E7D5B'}">${fmtMoney(c.fin.net)}</b></div>
+          <div><span>الحسابات</span><b>${c.accounts}</b></div>
+        </div>
+        <div class="center-link"><input class="plain-input" readonly value="${escapeHtml(centerLink(c.id))}"><button type="button" class="ghost sc-copy" data-link="${escapeHtml(centerLink(c.id))}">نسخ الرابط</button></div>
+        <button class="btn btn-primary sc-open" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}">فتح المركز (اطلاع)</button>
+      </div>`; }).join('')}
+    <div class="settings-block"><h3>إضافة مركز جديد</h3>
+      <p style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">بينعمل للمركز مساحة بيانات مستقلة ورابط خاص فيه، وحساب مدير يدخل فيه المركز.</p>
+      <div class="field"><label>اسم المركز</label><input class="plain-input" id="nc-name" type="text" placeholder="مثال: مركز النور لتحفيظ القرآن"></div>
+      <div class="field"><label>معرّف الرابط (حروف إنجليزية صغيرة وأرقام و -)</label><input class="plain-input" id="nc-id" type="text" dir="ltr" placeholder="alnoor"></div>
+      <div class="field"><label>اسم مدير المركز</label><input class="plain-input" id="nc-admin" type="text"></div>
+      <div class="field"><label>بريد المدير الإلكتروني</label><input class="plain-input" id="nc-email" type="email" dir="ltr"></div>
+      <div class="field"><label>كلمة مرور المدير (6 أحرف على الأقل)</label><input class="plain-input" id="nc-pass" type="text" dir="ltr"></div>
+      <div id="nc-error" style="font-size:12px;color:var(--red);margin-bottom:8px;"></div>
+      <button class="btn btn-primary" id="nc-create">إنشاء المركز</button>
+    </div>`;
+  }
+  return `
+  <div class="topbar">
+    <div>
+      <h2>لوحة مسؤول ملف القرآن والحلقات</h2>
+      <div class="who">مرحباً، ${escapeHtml(state.currentUser||'')}${d && d.at ? ' · آخر تحديث ' + d.at.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
+    </div>
+    <div style="display:flex;gap:6px;"><button class="logout" id="sc-refresh">تحديث</button><button class="logout" id="sc-logout">خروج</button></div>
+  </div>
+  <div class="content super-content" id="content">${body}</div>`;
+}
+function attachSuperHandlers(){
+  const rf = document.getElementById('sc-refresh'); if(rf) rf.onclick = ()=> loadSuperData();
+  const lo = document.getElementById('sc-logout'); if(lo) lo.onclick = ()=> doLogout();
+  document.querySelectorAll('.sc-copy').forEach(b=> b.onclick = async ()=>{
+    try{ await navigator.clipboard.writeText(b.dataset.link); showToast('تم نسخ الرابط'); }catch(e){ showToast(b.dataset.link); }
+  });
+  document.querySelectorAll('.sc-open').forEach(b=> b.onclick = ()=> enterCenter(b.dataset.id, b.dataset.name));
+  const cr = document.getElementById('nc-create'); if(cr) cr.onclick = createCenter;
+}
+async function enterCenter(id, name){
+  CENTER_ID = id; state.superViewing = true; state.viewedCenterName = name; state.currentRole = 'admin'; state.view = 'dashboard';
+  resetCenterState(); state.loading = true; render();
+  try{ await loadAppData(); }catch(e){ console.warn(e); state.loading = false; render(); }
+}
+function exitCenter(){
+  state.superViewing = false; state.currentRole = 'super'; CENTER_ID = 'main'; state.viewedCenterName = null;
+  resetCenterState(); state.view = 'centers'; state.publicCenter = null;
+  loadAppData();
+}
+function superBannerHTML(){
+  return `<div class="super-banner"><span>👁 وضع الاطلاع فقط — ${escapeHtml(state.viewedCenterName||'')}</span><button type="button" id="sc-back">رجوع للمراكز</button></div>`;
+}
+function attachSuperBannerHandlers(){ const b = document.getElementById('sc-back'); if(b) b.onclick = exitCenter; }
+
+async function createCenter(){
+  const err = document.getElementById('nc-error'); err.textContent = '';
+  const name = document.getElementById('nc-name').value.trim();
+  const id = document.getElementById('nc-id').value.trim().toLowerCase();
+  const admin = document.getElementById('nc-admin').value.trim();
+  const email = document.getElementById('nc-email').value.trim();
+  const pass = document.getElementById('nc-pass').value;
+  if(!name || !id || !admin || !email || !pass){ err.textContent = 'عبّي كل الحقول'; return; }
+  if(!/^[a-z0-9-]{2,30}$/.test(id) || id === 'main'){ err.textContent = 'المعرّف: حروف إنجليزية صغيرة وأرقام و - فقط (2 إلى 30)، ومش "main"'; return; }
+  if(pass.length < 6){ err.textContent = 'كلمة المرور 6 أحرف على الأقل'; return; }
+  if(state.superData && state.superData.centers.some(c=>c.id===id)){ err.textContent = 'هذا المعرّف مستخدم'; return; }
+  const btn = document.getElementById('nc-create'); btn.disabled = true;
+  try{
+    // The new manager's login is created through a second Firebase connection so this
+    // supervisor session is never switched to the new account.
+    const sec = firebase.apps.find(a=>a.name==='sec') || firebase.initializeApp(FIREBASE_CONFIG, 'sec');
+    const cred = await sec.auth().createUserWithEmailAndPassword(email, pass);
+    try{ await sec.auth().signOut(); }catch(e){}
+    const now = new Date().toISOString();
+    await firestoreDb.collection('centers').doc(id).set({ name, createdAt: now });
+    await firestoreDb.collection('quran_app').doc(dkFor(id,'centerSettings')).set({ value: JSON.stringify({ name, fullName: name, tagline: '', directorName: admin, teachers: [] }) });
+    await firestoreDb.collection('users').doc(cred.user.uid).set({ username: admin, email, role: 'admin', centerId: id, teacherLink: null, disabled: false, createdAt: now });
+    showToast('تم إنشاء المركز — شارك الرابط وبيانات دخول المدير معه');
+    await loadSuperData();
+  }catch(e){
+    err.textContent = (e && e.code && mapAuthError(e)) || 'تعذّر إنشاء المركز، تحقق من الصلاحيات';
+    console.error(e);
+  }finally{ btn.disabled = false; }
+}
+
 async function saveTrash(){
   await storageAdapter.set(STORAGE_TRASH, JSON.stringify(state.trash || []));
 }
@@ -2989,7 +3283,9 @@ function currentYearMonth(){
 function render(){
   if(state.loading){ app.innerHTML = loadingScreen(); return; }
   if(!state.currentUser){ app.innerHTML = authScreen(); attachAuthHandlers(); return; }
-  app.innerHTML = mainScreen();
+  if(isSuperHome()){ app.innerHTML = superScreen(); attachSuperHandlers(); return; }
+  app.innerHTML = (state.superViewing ? superBannerHTML() : '') + mainScreen();
+  if(state.superViewing) attachSuperBannerHandlers();
   attachMainHandlers();
 }
 
@@ -3193,6 +3489,7 @@ function attachAuthHandlers(){
           errEl.textContent = data && data.disabled ? 'هذا الحساب معطّل — تواصل مع المدير' : 'تعذّر إيجاد بيانات الحساب';
           return;
         }
+        applyCenterFromProfile(data);
         state.currentUser = data.username || email;
         state.currentRole = data.role || 'examiner';
         state.currentTeacherLink = data.teacherLink || null;
@@ -3355,7 +3652,7 @@ function attachAuthHandlers(){
       try{
         const cred = await firebaseAuth.createUserWithEmailAndPassword(email, p);
         await firestoreDb.collection('users').doc(cred.user.uid).set({
-          username: u, email, role, teacherLink: teacherLink || null, disabled: !forced, createdAt: new Date().toISOString()
+          username: u, email, role, centerId: URL_CENTER_ID, teacherLink: teacherLink || null, disabled: !forced, createdAt: new Date().toISOString()
         });
         if(!forced){
           // Pending: the admin must activate the account before it can sign in.
@@ -3367,6 +3664,7 @@ function attachAuthHandlers(){
           showToast('تم إنشاء حسابك — بانتظار تفعيل المدير قبل أول دخول');
           return;
         }
+        CENTER_ID = URL_CENTER_ID; state.realRole = role;
         try{ await loadAppData(); }catch(e2){}
         state.currentUser = u;
         state.currentRole = role;
@@ -3617,7 +3915,7 @@ const BOOKING_WEEKDAYS_DEFAULT = BOOKING_ALLOWED_WEEKDAYS.slice();
 const BOOKING_MAX_DEFAULT = BOOKING_MAX_PER_DAY;
 function applyCenterOverrides(){
   const cs = state.centerSettings || {};
-  const t = (Array.isArray(cs.teachers) && cs.teachers.length) ? cs.teachers : TEACHERS_DEFAULT;
+  const t = (Array.isArray(cs.teachers) && (cs.teachers.length || CENTER_ID !== 'main')) ? cs.teachers : (CENTER_ID === 'main' ? TEACHERS_DEFAULT : []);
   TEACHERS.length = 0; t.forEach(n=>TEACHERS.push(n));
   const w = (Array.isArray(cs.bookingWeekdays) && cs.bookingWeekdays.length) ? cs.bookingWeekdays : BOOKING_WEEKDAYS_DEFAULT;
   BOOKING_ALLOWED_WEEKDAYS.length = 0; w.forEach(d=>BOOKING_ALLOWED_WEEKDAYS.push(d));
@@ -3636,11 +3934,12 @@ const BOOKING_FAIL_COOLDOWN_DAYS = 7;
    changes anything, so nothing breaks for centers that never bother. */
 function getCenterSettings(){
   const s = state.centerSettings || {};
+  const pubName = (CENTER_ID !== 'main' && state.publicCenter && state.publicCenter.name) || null;
   return {
-    name: s.name || CENTER_NAME_DEFAULT,
-    fullName: s.fullName || CENTER_FULLNAME_DEFAULT,
+    name: s.name || pubName || CENTER_NAME_DEFAULT,
+    fullName: s.fullName || pubName || CENTER_FULLNAME_DEFAULT,
     tagline: s.tagline || CENTER_TAGLINE_DEFAULT,
-    directorName: s.directorName || CENTER_DIRECTOR_NAME,
+    directorName: s.directorName || (CENTER_ID === 'main' ? CENTER_DIRECTOR_NAME : ''),
     logoDataUri: s.logoDataUri || LOGO_DATA_URI,
   };
 }
@@ -5987,6 +6286,7 @@ function statsView(){
 
   return `
   <div class="section-title">الإحصاءات</div>
+  ${halaqaStatsCardHTML()}
   ${attendanceAdminCardHTML()}
 
   <div class="stat-row">
@@ -7487,7 +7787,7 @@ function attachStudentDetailHandlers(){
 }
 
 /* ---------------- SETTINGS VIEW ---------------- */
-const roleLabel = { admin: 'مدير', examiner: 'مختبِر', teacher: 'محفّظ' };
+const roleLabel = { admin: 'مدير', examiner: 'مختبِر', teacher: 'محفّظ', super: 'مسؤول الملف' };
 let centerSettingsExpanded = false;
 
 
@@ -7569,6 +7869,7 @@ function settingsView(){
         <span class="tm-name">${escapeHtml(n)}</span>
         <button class="ghost tm-rename" data-i="${i}" aria-label="تعديل الاسم">تعديل</button>
         <button class="ghost tm-del" data-i="${i}" aria-label="حذف">حذف</button>
+        ${halaqaPickerHTML(n)}
       </div>`).join('')}
     </div>
     <div class="field" style="display:flex; gap:8px; margin-top:10px;">
@@ -7895,6 +8196,8 @@ function attachSettingsHandlers(){
     applyCenterOverrides();
   }
   async function renameTeacherEverywhere(oldN, newN){
+    const hq = (state.centerSettings && state.centerSettings.halaqat) || {};
+    if(hq[oldN]){ hq[newN] = hq[oldN]; delete hq[oldN]; state.centerSettings.halaqat = hq; await saveCenterSettings(); }
     state.exams.forEach(e=>{ if(e.teacherName===oldN) e.teacherName = newN; });
     state.students.forEach(x=>{ if(x.registeredByTeacher===oldN) x.registeredByTeacher = newN; });
     (state.schedule||[]).forEach(x=>{ if(x.teacherName===oldN) x.teacherName = newN; });
@@ -7949,6 +8252,22 @@ function attachSettingsHandlers(){
       showToast('تم حذف المحفّظ من القائمة');
       render();
     };
+  });
+
+  /* ----- Admin: halaqa classification ----- */
+  const saveHalaqa = async (name, cat, type)=>{
+    const hq = { ...((state.centerSettings && state.centerSettings.halaqat) || {}) };
+    if(cat) hq[name] = { cat, type: type || '' }; else delete hq[name];
+    state.centerSettings = { ...(state.centerSettings || {}), halaqat: hq };
+    await saveCenterSettings();
+  };
+  document.querySelectorAll('.hq-cat').forEach(sel=> sel.onchange = async ()=>{
+    await saveHalaqa(sel.dataset.name, sel.value, '');
+    showToast(sel.value ? 'تم حفظ التصنيف — اختر نوع الحلقة' : 'تم إزالة التصنيف'); render();
+  });
+  document.querySelectorAll('.hq-type').forEach(sel=> sel.onchange = async ()=>{
+    const cat = ((state.centerSettings.halaqat || {})[sel.dataset.name] || {}).cat;
+    await saveHalaqa(sel.dataset.name, cat, sel.value); showToast('تم حفظ نوع الحلقة');
   });
 
   /* ----- Admin: booking settings ----- */
@@ -8400,6 +8719,7 @@ if (firebaseAuth){
       const cached = localStorage.getItem('cached_profile_' + uid);
       if(!cached) return false;
       const profile = JSON.parse(cached);
+      applyCenterFromProfile(profile);
       state.currentUser = profile.username;
       state.currentRole = profile.role;
       state.currentTeacherLink = profile.teacherLink;
@@ -8420,13 +8740,14 @@ if (firebaseAuth){
       try{
         const doc = await withTimeout(firestoreDb.collection('users').doc(user.uid).get(), 5000);
         if (doc.exists && !doc.data().disabled){
+          applyCenterFromProfile(doc.data());
           state.currentUser = doc.data().username;
           state.currentRole = doc.data().role || 'examiner';
           state.currentTeacherLink = doc.data().teacherLink || null;
           state.currentUid = user.uid;
           try{
             localStorage.setItem('cached_profile_' + user.uid, JSON.stringify({
-              username: state.currentUser, role: state.currentRole, teacherLink: state.currentTeacherLink,
+              username: state.currentUser, role: state.currentRole, teacherLink: state.currentTeacherLink, centerId: CENTER_ID,
             }));
             localStorage.setItem('last_session_uid', user.uid);
           }catch(e){}
@@ -8447,6 +8768,7 @@ if (firebaseAuth){
           const cached = localStorage.getItem('cached_profile_' + user.uid);
           if(cached){
             const profile = JSON.parse(cached);
+            applyCenterFromProfile(profile);
             state.currentUser = profile.username;
             state.currentRole = profile.role;
             state.currentTeacherLink = profile.teacherLink;
@@ -8463,6 +8785,8 @@ if (firebaseAuth){
       // got instead of bouncing the person back to the login screen.
     } else {
       state.currentUser = null; state.currentRole = null; state.currentUid = null; state.currentTeacherLink = null; state.currentLocalId = null;
+      state.superViewing = false; state.superData = null; state.realRole = null;
+      if(CENTER_ID !== URL_CENTER_ID){ CENTER_ID = URL_CENTER_ID; resetCenterState(); }
       try{ localStorage.removeItem('last_session_uid'); }catch(e){}
     }
     if (!firstCheckDone){
