@@ -1496,6 +1496,7 @@ function maybeShowScheduleReminder(){
   }
 }
 
+window.addEventListener('online', ()=>{ if(typeof isSuperHome === 'function' && isSuperHome()) loadSuperData(); });
 let registeringNow = false; // true while a new account is being created, so the auth listener doesn't sign it out before its profile document exists
 let accountsLoadFailed = false; // true if a Firestore accounts read errored (e.g. blocked by security rules pre-login) — must NOT be treated as "zero accounts exist"
 
@@ -2683,18 +2684,40 @@ const superUndoStack = []; // [{label, fn}]
 function centerLink(id){ const u = location.origin + location.pathname; return id === 'main' ? u : u + '?c=' + id; }
 function superMonth(){ return state.superMonth || localDateStamp().slice(0,7); }
 function superPush(label, fn){ superUndoStack.push({ label, fn }); if(superUndoStack.length > 15) superUndoStack.shift(); }
+const SUPER_CACHE_KEY = 'super_cache_v1';
+function superCacheRead(month){
+  try{
+    const c = JSON.parse(localStorage.getItem(SUPER_CACHE_KEY) || 'null');
+    if(c && c.month === month && Array.isArray(c.centers)) return { ...c, at: new Date(c.at), loading:false, stale:true };
+  }catch(e){}
+  return null;
+}
+/* Server first (when online), local copy otherwise — and never waits forever. */
+async function superGet(ref){
+  if(navigator.onLine){
+    try{ return await withTimeout(ref.get({ source:'server' }), 8000); }catch(e){}
+  }
+  return await withTimeout(ref.get({ source:'cache' }), 4000);
+}
 async function loadSuperData(){
   if(!firestoreDb) return;
-  state.superData = { loading:true, centers:[] }; if(isSuperHome()) render();
   const cur = superMonth();
+  const cached = superCacheRead(cur);
+  if(cached){ state.superData = cached; }
+  else { state.superData = { loading:true, centers:[] }; }
+  if(isSuperHome()) render();
+  if(!navigator.onLine && cached) return;       // offline: show the saved copy straight away
   const reg = {}; // id -> registry doc
-  try{ const sn = await firestoreDb.collection('centers').get(); sn.forEach(d=>{ reg[d.id] = d.data(); }); }catch(e){}
+  try{ const sn = await superGet(firestoreDb.collection('centers')); sn.forEach(d=>{ reg[d.id] = d.data(); }); }catch(e){}
   let users = [];
-  try{ const sn = await firestoreDb.collection('users').get(); users = sn.docs.map(d=>({ uid:d.id, ...d.data() })); }catch(e){}
+  try{ const sn = await superGet(firestoreDb.collection('users')); users = sn.docs.map(d=>({ uid:d.id, ...d.data() })); }catch(e){}
+  if(!navigator.onLine && !Object.keys(reg).length && !users.length && !cached){
+    state.superData = { loading:false, offline:true, centers:[], month:cur, at:null }; if(isSuperHome()) render(); return;
+  }
   state.allAccounts = users;
   const rd = async (id, key)=>{
     try{
-      const d = await withTimeout(firestoreDb.collection('quran_app').doc(dkFor(id, key)).get({ source:'server' }), 12000);
+      const d = await superGet(firestoreDb.collection('quran_app').doc(dkFor(id, key)));
       return d.exists ? JSON.parse(d.data().value) : null;
     }catch(e){ return null; }
   };
@@ -2724,7 +2747,8 @@ async function loadSuperData(){
     };
   }));
   out.sort((x,y)=> x.id==='main' ? -1 : y.id==='main' ? 1 : x.name.localeCompare(y.name,'ar'));
-  state.superData = { loading:false, centers: out, month: cur, at: new Date() };
+  state.superData = { loading:false, centers: out, month: cur, at: new Date(), stale: !navigator.onLine };
+  try{ localStorage.setItem(SUPER_CACHE_KEY, JSON.stringify({ centers: out, month: cur, at: state.superData.at.toISOString() })); }catch(e){}
   if(isSuperHome()) render();
 }
 function hqLabel(key){
@@ -2743,13 +2767,15 @@ function superScreen(){
   const d = state.superData;
   const tab = state.superTab || 'centers';
   let body = '';
-  if(!d || d.loading){
+  if(d && d.offline){
+    body = `<div class="empty-state" style="padding:30px 10px;">لا يوجد اتصال بالإنترنت ولا توجد نسخة محفوظة بعد.<br>افتح اللوحة مرة وأنت متصل ليتم حفظ آخر بيانات، وبعدها بتظهر لك بدون نت.<br><br><button class="btn btn-primary" id="sc-refresh2">إعادة المحاولة</button></div>`;
+  } else if(!d || d.loading){
     body = `<div class="loading-screen" style="min-height:240px;"><div class="spinner"></div><div style="color:var(--ink-soft);font-size:13px;">جاري جمع بيانات المراكز...</div></div>`;
   } else if(tab === 'settings'){
     body = superSettingsHTML(d);
   } else {
     const T = superTotals(d);
-    body = `
+    body = (d.stale ? `<div class="fin-due"><span>📴 بيانات محفوظة${d.at ? ' من ' + escapeHtml(d.at.toLocaleString('ar-EG',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})) : ''} — ${navigator.onLine ? 'جاري التحديث...' : 'لا يوجد اتصال'}</span></div>` : '') + `
     <div class="att-datebar">
       <button type="button" id="sc-prev" aria-label="الشهر السابق">›</button>
       <div class="fin-month">${escapeHtml(finMonthLabel(d.month))}</div>
@@ -2837,6 +2863,7 @@ function superSettingsHTML(d){
 }
 function attachSuperHandlers(){
   const rf = document.getElementById('sc-refresh'); if(rf) rf.onclick = ()=> loadSuperData();
+  const rf2 = document.getElementById('sc-refresh2'); if(rf2) rf2.onclick = ()=> loadSuperData();
   const lo = document.getElementById('sc-logout'); if(lo) lo.onclick = ()=> doLogout();
   document.querySelectorAll('.sc-tabs button').forEach(b=> b.onclick = ()=>{ state.superTab = b.dataset.t; render(); });
   const mv = async n=>{ state.superMonth = finShiftMonth(superMonth(), n); await loadSuperData(); };
@@ -9028,6 +9055,7 @@ if (firebaseAuth){
     } else {
       state.currentUser = null; state.currentRole = null; state.currentUid = null; state.currentTeacherLink = null; state.currentLocalId = null;
       state.superViewing = false; state.superData = null; state.realRole = null;
+      try{ localStorage.removeItem('super_cache_v1'); }catch(e){}
       if(CENTER_ID !== URL_CENTER_ID){ CENTER_ID = URL_CENTER_ID; resetCenterState(); }
       try{ localStorage.removeItem('last_session_uid'); }catch(e){}
     }
