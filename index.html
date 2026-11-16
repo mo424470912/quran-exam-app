@@ -807,6 +807,12 @@ html[data-theme="dark"] .app-credit img{ filter:invert(1) brightness(1.15); }
 .center-grid div{ text-align:center; background:var(--cream,#FBF4E2); border-radius:10px; padding:6px 2px; }
 .center-grid span{ display:block; font-size:11px; color:var(--ink-soft); } .center-grid b{ font-size:16px; }
 .center-link{ display:flex; gap:6px; margin-bottom:10px; } .center-link input{ flex:1; min-width:0; font-size:11px; direction:ltr; } .center-link button{ font-size:12px; white-space:nowrap; }
+.sc-tabs{ display:flex; gap:8px; padding:10px 14px 0; }
+.sc-tabs button{ flex:1; border:1.5px solid var(--line); background:var(--paper); border-radius:12px; padding:10px; font-family:'Tajawal'; font-weight:800; font-size:14px; cursor:pointer; color:var(--ink); }
+.sc-tabs button.on{ background:var(--green); color:#fff; border-color:var(--green); }
+.center-card.archived{ opacity:.65; }
+.center-actions{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; } .center-actions button{ flex:1; font-size:12.5px; padding:8px 6px; }
+.center-actions .danger{ color:#B3392F; border-color:#B3392F; }
 </style>
 </head>
 <body>
@@ -1232,15 +1238,18 @@ function showToast(msg){
 function applyCenterFromProfile(p){
   state.realRole = p.role || 'examiner';
   state.superViewing = false;
-  CENTER_ID = state.realRole === 'super' ? 'main' : (p.centerId || 'main');
+  CENTER_ID = (state.realRole === 'super' || state.realRole === 'owner') ? 'main' : (p.centerId || 'main');
 }
 function resetCenterState(){
   Object.assign(state, { exams:[], students:[], schedule:[], notifications:[], memorization:[], importBatches:[], trash:[], studentRequests:[], attendance:{}, attIndex:[], finance:{}, finIndex:[], centerSettings:null });
   finLoadedAll = false; finMonth = null; attDate = null; attAdminDate = null;
 }
-function isSuperHome(){ return state.currentRole === 'super' && !state.superViewing; }
+function isSuperHome(){ return (state.currentRole === 'super' || state.currentRole === 'owner') && !state.superViewing; }
+function canAddCenters(){ return state.realRole === 'super' || state.realRole === 'owner'; }
+// 'super' (supervisor) can only ADD centers (and undo that within an hour); 'owner' manages every center. Neither can edit inside a center.
+function canManageCenters(){ return state.realRole === 'owner'; }
 function scopeAccounts(list){
-  return (list || []).filter(a => a.role !== 'super' && (a.centerId || 'main') === CENTER_ID);
+  return (list || []).filter(a => a.role !== 'super' && a.role !== 'owner' && (a.centerId || 'main') === CENTER_ID);
 }
 async function loadPublicCenter(){
   if(!firestoreDb || CENTER_ID === 'main'){ state.publicCenter = null; return; }
@@ -2666,42 +2675,52 @@ function halaqaStatsCardHTML(){
 }
 
 /* ---------------- Supervisor (مسؤول ملف القرآن والحلقات) ----------------
-   Sees every center: combined dashboard, halaqa classification totals, and
-   can open any center read-only (finance included). Can add new centers. */
+   Sees every center: combined dashboard, halaqa classification totals, reports
+   and exports; can open any center read-only (finance included), add / rename /
+   pause / delete centers, and undo his last actions. */
+const superRaw = {};      // id -> raw documents (for exports)
+const superUndoStack = []; // [{label, fn}]
 function centerLink(id){ const u = location.origin + location.pathname; return id === 'main' ? u : u + '?c=' + id; }
+function superMonth(){ return state.superMonth || localDateStamp().slice(0,7); }
+function superPush(label, fn){ superUndoStack.push({ label, fn }); if(superUndoStack.length > 15) superUndoStack.shift(); }
 async function loadSuperData(){
   if(!firestoreDb) return;
   state.superData = { loading:true, centers:[] }; if(isSuperHome()) render();
-  const cur = localDateStamp().slice(0,7);
-  const names = { main: null };
-  try{ const sn = await firestoreDb.collection('centers').get(); sn.forEach(d=>{ names[d.id] = d.data().name || d.id; }); }catch(e){}
+  const cur = superMonth();
+  const reg = {}; // id -> registry doc
+  try{ const sn = await firestoreDb.collection('centers').get(); sn.forEach(d=>{ reg[d.id] = d.data(); }); }catch(e){}
   let users = [];
   try{ const sn = await firestoreDb.collection('users').get(); users = sn.docs.map(d=>({ uid:d.id, ...d.data() })); }catch(e){}
+  state.allAccounts = users;
   const rd = async (id, key)=>{
     try{
       const d = await withTimeout(firestoreDb.collection('quran_app').doc(dkFor(id, key)).get({ source:'server' }), 12000);
       return d.exists ? JSON.parse(d.data().value) : null;
     }catch(e){ return null; }
   };
-  const out = await Promise.all(Object.keys(names).map(async id=>{
+  const ids = ['main', ...Object.keys(reg)];
+  const out = await Promise.all(ids.map(async id=>{
     const [st, ex, cs, att, fin] = await Promise.all([rd(id,'students'), rd(id,'exams'), rd(id,'centerSettings'), rd(id,'att_'+cur), rd(id,'fin_'+cur)]);
+    superRaw[id] = { students: st, exams: ex, centerSettings: cs, ['att_'+cur]: att, ['fin_'+cur]: fin };
     const students = Array.isArray(st) ? st : [], exams = Array.isArray(ex) ? ex : [], set = cs && typeof cs==='object' ? cs : {};
     const teachers = Array.isArray(set.teachers) ? set.teachers : (id==='main' ? TEACHERS_DEFAULT : []);
     const halaqat = set.halaqat || {};
     const a = { p:0, a:0, e:0 }; (Array.isArray(att) ? att : []).forEach(r=>{ if(a[r.s] !== undefined) a[r.s]++; });
     let inc = 0, outc = 0; (Array.isArray(fin) ? fin : []).forEach(r=>{ if(r.x) return; if(r.t==='in') inc += r.a; else outc += r.a; });
-    const accs = users.filter(u=> u.role!=='super' && (u.centerId||'main')===id);
-    const hq = {};
+    const accs = users.filter(u=> u.role!=='super' && u.role!=='owner' && (u.centerId||'main')===id);
+    const hq = {}, teacherRows = [];
     teachers.forEach(t=>{
       const h = halaqat[t]; const n = students.filter(x=>x.registeredByTeacher===t).length;
       const key = h && HALAQA_CATS[h.cat] ? h.cat + '|' + (h.type||'') : 'none|';
       const g = hq[key] = hq[key] || { teachers:0, students:0 }; g.teachers++; g.students += n;
+      teacherRows.push({ teacher:t, key, students:n });
     });
+    const r = reg[id] || {};
     return {
-      id, name: set.name || names[id] || (id==='main' ? CENTER_NAME_DEFAULT : id),
+      id, name: id==='main' ? (set.name || CENTER_NAME_DEFAULT) : (r.name || set.name || id), archived: !!r.archived,
       students: students.length, teachers: teachers.length,
       examsTotal: exams.length, examsMonth: exams.filter(e=> (e.date||'').slice(0,7)===cur).length,
-      att: a, fin: { inc, out: outc, net: inc - outc }, accounts: accs.length, pending: accs.filter(u=>u.disabled).length, hq,
+      att: a, fin: { inc, out: outc, net: inc - outc }, accounts: accs.length, pending: accs.filter(u=>u.disabled && !(r.archivedUids||[]).includes(u.uid)).length, hq, teacherRows,
     };
   }));
   out.sort((x,y)=> x.id==='main' ? -1 : y.id==='main' ? 1 : x.name.localeCompare(y.name,'ar'));
@@ -2714,43 +2733,60 @@ function hqLabel(key){
   const tl = (HALAQA_TYPES[cat].find(x=>x[0]===type) || [])[1];
   return HALAQA_CATS[cat].short + (tl ? ' — ' + tl : '');
 }
+function superTotals(d){
+  const sum = f => d.centers.reduce((t,c)=> t + f(c), 0);
+  const hq = {}; d.centers.forEach(c=> Object.entries(c.hq).forEach(([k,v])=>{ const g = hq[k] = hq[k] || { teachers:0, students:0 }; g.teachers += v.teachers; g.students += v.students; }));
+  const hqKeys = Object.keys(hq).sort((a,b)=> (a.startsWith('none')?1:0) - (b.startsWith('none')?1:0) || a.localeCompare(b));
+  return { students: sum(c=>c.students), teachers: sum(c=>c.teachers), examsMonth: sum(c=>c.examsMonth), inc: sum(c=>c.fin.inc), out: sum(c=>c.fin.out), hq, hqKeys };
+}
 function superScreen(){
   const d = state.superData;
-  const cs = getCenterSettings();
+  const tab = state.superTab || 'centers';
   let body = '';
   if(!d || d.loading){
     body = `<div class="loading-screen" style="min-height:240px;"><div class="spinner"></div><div style="color:var(--ink-soft);font-size:13px;">جاري جمع بيانات المراكز...</div></div>`;
+  } else if(tab === 'settings'){
+    body = superSettingsHTML(d);
   } else {
-    const sum = f => d.centers.reduce((t,c)=> t + f(c), 0);
-    const hq = {}; d.centers.forEach(c=> Object.entries(c.hq).forEach(([k,v])=>{ const g = hq[k] = hq[k] || { teachers:0, students:0 }; g.teachers += v.teachers; g.students += v.students; }));
-    const hqKeys = Object.keys(hq).sort((a,b)=> (a.startsWith('none')?1:0) - (b.startsWith('none')?1:0) || a.localeCompare(b));
+    const T = superTotals(d);
     body = `
+    <div class="att-datebar">
+      <button type="button" id="sc-prev" aria-label="الشهر السابق">›</button>
+      <div class="fin-month">${escapeHtml(finMonthLabel(d.month))}</div>
+      <button type="button" id="sc-next" aria-label="الشهر التالي" ${d.month >= localDateStamp().slice(0,7) ? 'disabled' : ''}>‹</button>
+    </div>
     <div class="fin-cards" style="grid-template-columns:repeat(2,1fr);">
-      <div class="fin-card"><div class="lbl">المراكز</div><div class="val" style="color:var(--green);">${d.centers.length}</div></div>
-      <div class="fin-card"><div class="lbl">الطلاب</div><div class="val" style="color:var(--green);">${sum(c=>c.students)}</div></div>
-      <div class="fin-card"><div class="lbl">المحفّظون (الحلقات)</div><div class="val" style="color:var(--green);">${sum(c=>c.teachers)}</div></div>
-      <div class="fin-card"><div class="lbl">اختبارات هذا الشهر</div><div class="val" style="color:var(--green);">${sum(c=>c.examsMonth)}</div></div>
+      <div class="fin-card"><div class="lbl">المراكز</div><div class="val" style="color:var(--green);">${d.centers.filter(c=>!c.archived).length}</div></div>
+      <div class="fin-card"><div class="lbl">الطلاب</div><div class="val" style="color:var(--green);">${T.students}</div></div>
+      <div class="fin-card"><div class="lbl">المحفّظون (الحلقات)</div><div class="val" style="color:var(--green);">${T.teachers}</div></div>
+      <div class="fin-card"><div class="lbl">اختبارات الشهر</div><div class="val" style="color:var(--green);">${T.examsMonth}</div></div>
     </div>
     <div class="settings-block"><h3>الحلقات حسب التصنيف (كل المراكز)</h3>
-      ${hqKeys.length ? hqKeys.map(k=>`<div class="hq-type-row"><span>${escapeHtml(hqLabel(k))}</span><span>${hq[k].teachers} حلقة · ${hq[k].students} طالب</span></div>`).join('') : '<p style="font-size:12px;color:var(--ink-soft);">ما في حلقات مصنّفة بعد.</p>'}
+      ${T.hqKeys.length ? T.hqKeys.map(k=>`<div class="hq-type-row"><span>${escapeHtml(hqLabel(k))}</span><span>${T.hq[k].teachers} حلقة · ${T.hq[k].students} طالب</span></div>`).join('') : '<p style="font-size:12px;color:var(--ink-soft);">ما في حلقات مصنّفة بعد.</p>'}
     </div>
     <div class="section-title" style="font-size:16px;">المراكز</div>
     ${d.centers.map(c=>{
       const marked = c.att.p + c.att.a + c.att.e;
-      return `<div class="center-card">
-        <div class="center-card-head"><b>${escapeHtml(c.name)}</b>${c.pending ? `<span class="tab-badge" style="position:static;">${c.pending} حساب بانتظار التفعيل</span>` : ''}</div>
+      const empty = !c.students && !c.examsTotal;
+      return `<div class="center-card ${c.archived?'archived':''}">
+        <div class="center-card-head"><b>${escapeHtml(c.name)}${c.archived ? ' <small>(موقوف)</small>' : ''}</b>${c.pending ? `<span class="tab-badge" style="position:static;">${c.pending} حساب بانتظار التفعيل</span>` : ''}</div>
         <div class="center-grid">
           <div><span>الطلاب</span><b>${c.students}</b></div>
           <div><span>المحفّظون</span><b>${c.teachers}</b></div>
           <div><span>اختبارات الشهر</span><b>${c.examsMonth}</b></div>
-          <div><span>الحضور هذا الشهر</span><b>${marked ? Math.round(c.att.p/marked*100) + '%' : '—'}</b></div>
-          <div><span>صافي مالية الشهر</span><b style="direction:ltr;color:${c.fin.net<0?'#B3392F':'#2E7D5B'}">${fmtMoney(c.fin.net)}</b></div>
+          <div><span>الحضور</span><b>${marked ? Math.round(c.att.p/marked*100) + '%' : '—'}</b></div>
+          <div><span>صافي المالية</span><b style="direction:ltr;color:${c.fin.net<0?'#B3392F':'#2E7D5B'}">${fmtMoney(c.fin.net)}</b></div>
           <div><span>الحسابات</span><b>${c.accounts}</b></div>
         </div>
         <div class="center-link"><input class="plain-input" readonly value="${escapeHtml(centerLink(c.id))}"><button type="button" class="ghost sc-copy" data-link="${escapeHtml(centerLink(c.id))}">نسخ الرابط</button></div>
         <button class="btn btn-primary sc-open" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}">فتح المركز (اطلاع)</button>
+        ${c.id !== 'main' && canManageCenters() ? `<div class="center-actions">
+          <button class="ghost sc-rename" data-id="${escapeHtml(c.id)}">تعديل الاسم</button>
+          <button class="ghost sc-pause" data-id="${escapeHtml(c.id)}" data-archived="${c.archived?1:0}">${c.archived ? 'إعادة التفعيل' : 'إيقاف المركز'}</button>
+          ${empty ? `<button class="ghost danger sc-delete" data-id="${escapeHtml(c.id)}">حذف</button>` : ''}
+        </div>` : ''}
       </div>`; }).join('')}
-    <div class="settings-block"><h3>إضافة مركز جديد</h3>
+    ${canAddCenters() ? `<div class="settings-block"><h3>إضافة مركز جديد</h3>
       <p style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">بينعمل للمركز مساحة بيانات مستقلة ورابط خاص فيه، وحساب مدير يدخل فيه المركز.</p>
       <div class="field"><label>اسم المركز</label><input class="plain-input" id="nc-name" type="text" placeholder="مثال: مركز النور لتحفيظ القرآن"></div>
       <div class="field"><label>معرّف الرابط (حروف إنجليزية صغيرة وأرقام و -)</label><input class="plain-input" id="nc-id" type="text" dir="ltr" placeholder="alnoor"></div>
@@ -2759,7 +2795,7 @@ function superScreen(){
       <div class="field"><label>كلمة مرور المدير (6 أحرف على الأقل)</label><input class="plain-input" id="nc-pass" type="text" dir="ltr"></div>
       <div id="nc-error" style="font-size:12px;color:var(--red);margin-bottom:8px;"></div>
       <button class="btn btn-primary" id="nc-create">إنشاء المركز</button>
-    </div>`;
+    </div>` : ''}`;
   }
   return `
   <div class="topbar">
@@ -2769,16 +2805,57 @@ function superScreen(){
     </div>
     <div style="display:flex;gap:6px;"><button class="logout" id="sc-refresh">تحديث</button><button class="logout" id="sc-logout">خروج</button></div>
   </div>
+  <div class="sc-tabs"><button type="button" data-t="centers" class="${tab==='centers'?'on':''}">المراكز</button><button type="button" data-t="settings" class="${tab==='settings'?'on':''}">الإعدادات والتقارير</button></div>
   <div class="content super-content" id="content">${body}</div>`;
+}
+function superSettingsHTML(d){
+  const last = superUndoStack[superUndoStack.length-1];
+  const email = (firebaseAuth && firebaseAuth.currentUser && firebaseAuth.currentUser.email) || '';
+  return `
+  <div class="settings-block"><h3>حسابي</h3>
+    <div class="field"><label>الاسم</label><input class="plain-input" id="ss-name" type="text" value="${escapeHtml(state.currentUser||'')}"></div>
+    <button class="btn btn-primary" id="ss-save-name" style="margin-bottom:14px;">حفظ الاسم</button>
+    <div class="field"><label>البريد الإلكتروني</label><input class="plain-input" type="text" dir="ltr" value="${escapeHtml(email)}" readonly></div>
+    <div class="field"><label>كلمة مرور جديدة (6 أحرف على الأقل)</label><input class="plain-input" id="ss-pass" type="password" dir="ltr" autocomplete="new-password"></div>
+    <div id="ss-error" style="font-size:12px;color:var(--red);margin-bottom:8px;"></div>
+    <button class="btn" id="ss-save-pass">تغيير كلمة المرور</button>
+  </div>
+  ${canAddCenters() ? `<div class="settings-block"><h3>التراجع</h3>
+    <p style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">${last ? 'آخر خطوة: <b>' + escapeHtml(last.label) + '</b>' : 'ما في خطوات للتراجع عنها (بتنحفظ لحد ما تسكّر التطبيق).'}<br>التراجع عن إضافة مركز متاح خلال ساعة من إنشائه، ولو ما صار فيه طلاب.</p>
+    <button class="btn" id="ss-undo" ${last ? '' : 'disabled'}>التراجع عن آخر عملية</button>
+  </div>` : ''}
+  <div class="settings-block"><h3>التقارير والتصدير — ${escapeHtml(finMonthLabel(d.month))}</h3>
+    <p style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">الشهر بيتغيّر من صفحة المراكز.</p>
+    <div class="data-btn-row">
+      <button id="ss-report-pdf">تقرير المراكز PDF</button>
+      <button class="ghost" id="ss-export-xlsx">تصدير Excel</button>
+    </div>
+    <div class="data-btn-row" style="margin-top:8px;">
+      <button class="ghost" id="ss-export-json">نسخة احتياطية JSON</button>
+    </div>
+  </div>`;
 }
 function attachSuperHandlers(){
   const rf = document.getElementById('sc-refresh'); if(rf) rf.onclick = ()=> loadSuperData();
   const lo = document.getElementById('sc-logout'); if(lo) lo.onclick = ()=> doLogout();
+  document.querySelectorAll('.sc-tabs button').forEach(b=> b.onclick = ()=>{ state.superTab = b.dataset.t; render(); });
+  const mv = async n=>{ state.superMonth = finShiftMonth(superMonth(), n); await loadSuperData(); };
+  const pv = document.getElementById('sc-prev'); if(pv) pv.onclick = ()=> mv(-1);
+  const nx = document.getElementById('sc-next'); if(nx) nx.onclick = ()=>{ if(superMonth() < localDateStamp().slice(0,7)) mv(1); };
   document.querySelectorAll('.sc-copy').forEach(b=> b.onclick = async ()=>{
     try{ await navigator.clipboard.writeText(b.dataset.link); showToast('تم نسخ الرابط'); }catch(e){ showToast(b.dataset.link); }
   });
   document.querySelectorAll('.sc-open').forEach(b=> b.onclick = ()=> enterCenter(b.dataset.id, b.dataset.name));
   const cr = document.getElementById('nc-create'); if(cr) cr.onclick = createCenter;
+  document.querySelectorAll('.sc-rename').forEach(b=> b.onclick = ()=> renameCenter(b.dataset.id));
+  document.querySelectorAll('.sc-pause').forEach(b=> b.onclick = ()=> setCenterArchived(b.dataset.id, b.dataset.archived !== '1'));
+  document.querySelectorAll('.sc-delete').forEach(b=> b.onclick = ()=> deleteCenter(b.dataset.id));
+  const sn = document.getElementById('ss-save-name'); if(sn) sn.onclick = saveSuperName;
+  const sp = document.getElementById('ss-save-pass'); if(sp) sp.onclick = saveSuperPassword;
+  const un = document.getElementById('ss-undo'); if(un) un.onclick = undoSuper;
+  const rp = document.getElementById('ss-report-pdf'); if(rp) rp.onclick = ()=> exportSuperReportPDF(rp);
+  const xl = document.getElementById('ss-export-xlsx'); if(xl) xl.onclick = ()=> exportSuperExcel(xl);
+  const js = document.getElementById('ss-export-json'); if(js) js.onclick = ()=> exportSuperJSON(js);
 }
 async function enterCenter(id, name){
   CENTER_ID = id; state.superViewing = true; state.viewedCenterName = name; state.currentRole = 'admin'; state.view = 'dashboard';
@@ -2786,7 +2863,7 @@ async function enterCenter(id, name){
   try{ await loadAppData(); }catch(e){ console.warn(e); state.loading = false; render(); }
 }
 function exitCenter(){
-  state.superViewing = false; state.currentRole = 'super'; CENTER_ID = 'main'; state.viewedCenterName = null;
+  state.superViewing = false; state.currentRole = state.realRole || 'super'; CENTER_ID = 'main'; state.viewedCenterName = null;
   resetCenterState(); state.view = 'centers'; state.publicCenter = null;
   loadAppData();
 }
@@ -2796,6 +2873,7 @@ function superBannerHTML(){
 function attachSuperBannerHandlers(){ const b = document.getElementById('sc-back'); if(b) b.onclick = exitCenter; }
 
 async function createCenter(){
+  if(!canAddCenters()) return;
   const err = document.getElementById('nc-error'); err.textContent = '';
   const name = document.getElementById('nc-name').value.trim();
   const id = document.getElementById('nc-id').value.trim().toLowerCase();
@@ -2808,21 +2886,185 @@ async function createCenter(){
   if(state.superData && state.superData.centers.some(c=>c.id===id)){ err.textContent = 'هذا المعرّف مستخدم'; return; }
   const btn = document.getElementById('nc-create'); btn.disabled = true;
   try{
-    // The new manager's login is created through a second Firebase connection so this
-    // supervisor session is never switched to the new account.
     const sec = firebase.apps.find(a=>a.name==='sec') || firebase.initializeApp(FIREBASE_CONFIG, 'sec');
     const cred = await sec.auth().createUserWithEmailAndPassword(email, pass);
     try{ await sec.auth().signOut(); }catch(e){}
     const now = new Date().toISOString();
-    await firestoreDb.collection('centers').doc(id).set({ name, createdAt: now });
+    await firestoreDb.collection('centers').doc(id).set({ name, createdAt: now, createdBy: state.currentUid, createdTs: firebase.firestore.FieldValue.serverTimestamp() });
     await firestoreDb.collection('quran_app').doc(dkFor(id,'centerSettings')).set({ value: JSON.stringify({ name, fullName: name, tagline: '', directorName: admin, teachers: [] }) });
     await firestoreDb.collection('users').doc(cred.user.uid).set({ username: admin, email, role: 'admin', centerId: id, teacherLink: null, disabled: false, createdAt: now });
+    superPush('إضافة مركز «' + name + '»', ()=> deleteCenter(id, true));
     showToast('تم إنشاء المركز — شارك الرابط وبيانات دخول المدير معه');
     await loadSuperData();
   }catch(e){
     err.textContent = (e && e.code && mapAuthError(e)) || 'تعذّر إنشاء المركز، تحقق من الصلاحيات';
     console.error(e);
   }finally{ btn.disabled = false; }
+}
+async function renameCenter(id, newName, silent){
+  if(!canManageCenters()) return;
+  const c = state.superData.centers.find(x=>x.id===id); if(!c) return;
+  if(newName === undefined){ const v = prompt('الاسم الجديد للمركز:', c.name); if(v === null) return; newName = v.trim(); }
+  if(!newName || newName === c.name) return;
+  const old = c.name;
+  try{
+    await firestoreDb.collection('centers').doc(id).update({ name: newName });
+    if(!silent) superPush('تعديل اسم «' + old + '»', ()=> renameCenter(id, old, true));
+    showToast('تم تعديل الاسم'); await loadSuperData();
+  }catch(e){ console.error(e); showToast('تعذّر التعديل'); }
+}
+async function setCenterArchived(id, archive, silent){
+  if(!canManageCenters()) return;
+  const c = state.superData.centers.find(x=>x.id===id); if(!c) return;
+  if(!silent && !confirm(archive ? `إيقاف «${c.name}»؟ بيتعطّل دخول كل حساباته لحد ما تعيد تفعيله (البيانات بتضل محفوظة).` : `إعادة تفعيل «${c.name}»؟`)) return;
+  try{
+    const ref = firestoreDb.collection('centers').doc(id);
+    if(archive){
+      const uids = (state.allAccounts||[]).filter(u=> u.role!=='super' && (u.centerId||'main')===id && !u.disabled).map(u=>u.uid);
+      for(const uid of uids) await firestoreDb.collection('users').doc(uid).update({ disabled: true });
+      await ref.update({ archived: true, archivedUids: uids });
+    } else {
+      const reg = await ref.get(); const uids = (reg.exists && reg.data().archivedUids) || [];
+      for(const uid of uids) await firestoreDb.collection('users').doc(uid).update({ disabled: false });
+      await ref.update({ archived: false, archivedUids: [] });
+    }
+    if(!silent) superPush((archive ? 'إيقاف «' : 'إعادة تفعيل «') + c.name + '»', ()=> setCenterArchived(id, !archive, true));
+    showToast(archive ? 'تم إيقاف المركز' : 'تم تفعيل المركز'); await loadSuperData();
+  }catch(e){ console.error(e); showToast('تعذّر تنفيذ العملية'); }
+}
+async function deleteCenter(id, silent){
+  if(!silent && !canManageCenters()) return; // only reachable as the undo of a center added moments ago
+  const c = state.superData.centers.find(x=>x.id===id); if(!c || id === 'main') return;
+  if(c.students || c.examsTotal){ showToast('ما بينحذف مركز فيه طلاب أو اختبارات — أوقفه بدل الحذف'); return; }
+  if(!silent && !confirm(`حذف «${c.name}» نهائياً؟ ما بينفع التراجع.`)) return;
+  try{
+    const keys = ['centerSettings','students','exams','schedule','notifications','memorization','importBatches','trash','studentRequests','attIndex','finIndex'];
+    for(const k of keys){ try{ await firestoreDb.collection('quran_app').doc(dkFor(id,k)).delete(); }catch(e){} }
+    for(const u of (state.allAccounts||[]).filter(u=> (u.centerId||'main')===id && u.role!=='super')) await firestoreDb.collection('users').doc(u.uid).delete();
+    await firestoreDb.collection('centers').doc(id).delete();
+    showToast('تم حذف المركز'); await loadSuperData();
+  }catch(e){ console.error(e); showToast('تعذّر الحذف — التراجع عن إضافة مركز متاح لمدة ساعة فقط'); throw e; }
+}
+async function undoSuper(){
+  if(!canAddCenters()) return;
+  const last = superUndoStack.pop(); if(!last) return;
+  try{ await last.fn(); showToast('تم التراجع: ' + last.label); }catch(e){ console.error(e); superUndoStack.push(last); showToast('تعذّر التراجع'); }
+  render();
+}
+async function saveSuperName(){
+  const v = document.getElementById('ss-name').value.trim(); const err = document.getElementById('ss-error'); err.textContent = '';
+  if(!v){ err.textContent = 'اكتب الاسم'; return; }
+  try{
+    const old = state.currentUser;
+    await firestoreDb.collection('users').doc(state.currentUid).update({ username: v });
+    state.currentUser = v; superPush('تغيير اسمي', async ()=>{ await firestoreDb.collection('users').doc(state.currentUid).update({ username: old }); state.currentUser = old; });
+    showToast('تم حفظ الاسم'); render();
+  }catch(e){ console.error(e); err.textContent = 'تعذّر الحفظ'; }
+}
+async function saveSuperPassword(){
+  const v = document.getElementById('ss-pass').value; const err = document.getElementById('ss-error'); err.textContent = '';
+  if(v.length < 6){ err.textContent = 'كلمة المرور 6 أحرف على الأقل'; return; }
+  try{ await firebaseAuth.currentUser.updatePassword(v); document.getElementById('ss-pass').value = ''; showToast('تم تغيير كلمة المرور'); }
+  catch(e){ err.textContent = mapAuthError(e); }
+}
+
+/* ----- exports & report ----- */
+function superDownload(blob, name){
+  const url = URL.createObjectURL(blob); const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+async function exportSuperExcel(btn){
+  btn.disabled = true;
+  try{
+    const d = state.superData; const wb = new ExcelJS.Workbook();
+    const w1 = wb.addWorksheet('المراكز', { views:[{ rightToLeft:true }] });
+    w1.columns = [{header:'المركز',key:'n',width:30},{header:'الطلاب',key:'s',width:10},{header:'المحفّظون',key:'t',width:11},{header:'اختبارات الشهر',key:'e',width:15},{header:'حضور',key:'p',width:8},{header:'غياب',key:'a',width:8},{header:'مأذون',key:'x',width:8},{header:'الوارد',key:'i',width:12},{header:'الصادر',key:'o',width:12},{header:'الصافي',key:'f',width:12},{header:'الحالة',key:'st',width:10}];
+    w1.getRow(1).font = { bold:true };
+    d.centers.forEach(c=> w1.addRow({ n:c.name, s:c.students, t:c.teachers, e:c.examsMonth, p:c.att.p, a:c.att.a, x:c.att.e, i:c.fin.inc, o:c.fin.out, f:c.fin.net, st:c.archived?'موقوف':'فعّال' }));
+    const w2 = wb.addWorksheet('الحلقات', { views:[{ rightToLeft:true }] });
+    w2.columns = [{header:'المركز',key:'c',width:28},{header:'المحفّظ',key:'t',width:24},{header:'التصنيف / النوع',key:'k',width:34},{header:'عدد الطلاب',key:'n',width:12}];
+    w2.getRow(1).font = { bold:true };
+    d.centers.forEach(c=> c.teacherRows.forEach(r=> w2.addRow({ c:c.name, t:r.teacher, k:hqLabel(r.key), n:r.students })));
+    const w3 = wb.addWorksheet('الطلاب', { views:[{ rightToLeft:true }] });
+    w3.columns = [{header:'المركز',key:'c',width:28},{header:'الطالب',key:'n',width:28},{header:'المحفّظ',key:'t',width:24},{header:'الهاتف',key:'p',width:16}];
+    w3.getRow(1).font = { bold:true };
+    d.centers.forEach(c=> ((superRaw[c.id]||{}).students || []).forEach(x=> w3.addRow({ c:c.name, n:x.name, t:x.registeredByTeacher||'', p:x.phone||'' })));
+    superDownload(new Blob([await wb.xlsx.writeBuffer()], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `المراكز-${d.month}.xlsx`);
+    showToast('تم تصدير Excel');
+  }catch(e){ console.error(e); showToast('تعذّر التصدير'); }
+  finally{ btn.disabled = false; }
+}
+function exportSuperJSON(btn){
+  try{
+    const d = state.superData;
+    const payload = { app:'quran-exam-supervisor', exportedAt:new Date().toISOString(), month:d.month, centers:d.centers.map(c=>({ id:c.id, name:c.name, archived:c.archived, summary:{ students:c.students, teachers:c.teachers, examsMonth:c.examsMonth, att:c.att, fin:c.fin }, data: superRaw[c.id] || {} })) };
+    superDownload(new Blob([JSON.stringify(payload)], { type:'application/json' }), `نسخة-المراكز-${localDateStamp()}.json`);
+    showToast('تم تصدير النسخة الاحتياطية');
+  }catch(e){ console.error(e); showToast('تعذّر التصدير'); }
+}
+async function exportSuperReportPDF(btn){
+  btn.disabled = true;
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF){ showToast('تعذّر تحميل مكتبة PDF — تأكد من الإنترنت'); return; }
+    const d = state.superData, T = superTotals(d);
+    await (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve());
+    const logo = await loadLogoImage();
+    const W = 1240, H = 1754, mX = 70, cw = W - mX*2;
+    const C = { green:'#0F5C45', greenD:'#0A4634', gold:'#C79A2E', goldL:'#E8C766', cream:'#FBF4E2', ink:'#17332A', soft:'#6B6355', red:'#B3392F', line:'#E4DCC8' };
+    const pages = []; let cv, ctx, y;
+    const fit = (t, mw)=>{ t = String(t||''); if(ctx.measureText(t).width <= mw) return t; while(t.length>1 && ctx.measureText(t+'…').width > mw) t = t.slice(0,-1); return t+'…'; };
+    const R = (t,x,yy,f,col,mw)=>{ ctx.direction='rtl'; ctx.textAlign='right'; ctx.font=f; ctx.fillStyle=col; ctx.fillText(mw?fit(t,mw):t,x,yy); };
+    const L = (t,x,yy,f,col)=>{ ctx.direction='ltr'; ctx.textAlign='left'; ctx.font=f; ctx.fillStyle=col; ctx.fillText(t,x,yy); };
+    const newPage = first=>{
+      cv = document.createElement('canvas'); cv.width = W; cv.height = H; ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,W,H); pages.push(cv);
+      if(first){
+        const g = ctx.createLinearGradient(0,0,W,260); g.addColorStop(0,C.greenD); g.addColorStop(1,C.green); ctx.fillStyle = g; ctx.fillRect(0,0,W,260);
+        ctx.fillStyle = C.gold; ctx.fillRect(0,256,W,6);
+        if(logo){ ctx.save(); ctx.beginPath(); ctx.arc(W-mX-80,130,80,0,7); ctx.clip(); ctx.drawImage(logo,W-mX-160,50,160,160); ctx.restore(); }
+        R('مسؤول ملف القرآن والحلقات', W-mX-190, 100, "800 34px 'Tajawal'", '#fff');
+        R('تقرير المراكز الشهري', W-mX-190, 160, "900 52px 'Tajawal'", C.goldL);
+        R(finMonthLabel(d.month), W-mX-190, 212, "700 30px 'Tajawal'", '#E8E2D0');
+        y = 310;
+      } else y = 90;
+    };
+    const ensure = h=>{ if(y + h > H - 110) newPage(false); };
+    const section = t=>{ ensure(110); rrPath(ctx,mX,y,cw,62,18); ctx.fillStyle = C.green; ctx.fill(); R(t,mX+cw-26,y+42,"800 30px 'Tajawal'",'#fff'); y += 82; };
+    newPage(true);
+    const bw = (cw - 60)/4;
+    [['المراكز', d.centers.filter(c=>!c.archived).length], ['الطلاب', T.students], ['الحلقات', T.teachers], ['اختبارات الشهر', T.examsMonth]].forEach((b,i)=>{
+      const x = mX + cw - (i+1)*bw - i*20;
+      rrPath(ctx,x,y,bw,130,20); ctx.fillStyle = C.cream; ctx.fill(); ctx.strokeStyle = C.green; ctx.lineWidth = 3; ctx.stroke();
+      ctx.textAlign='center'; ctx.direction='rtl'; ctx.fillStyle = C.soft; ctx.font = "700 24px 'Tajawal'"; ctx.fillText(b[0], x+bw/2, y+42);
+      ctx.fillStyle = C.green; ctx.font = "900 44px 'Tajawal'"; ctx.direction='ltr'; ctx.fillText(String(b[1]), x+bw/2, y+100);
+    });
+    y += 160;
+    section('الحلقات حسب التصنيف (كل المراكز)');
+    if(!T.hqKeys.length){ R('لا توجد حلقات مصنّفة', mX+cw-10, y+30, "600 24px 'Tajawal'", C.soft); y += 56; }
+    T.hqKeys.forEach((k,i)=>{ ensure(54); if(i%2===0){ ctx.fillStyle = C.cream; ctx.fillRect(mX,y,cw,54); } R(hqLabel(k), mX+cw-16, y+36, "700 25px 'Tajawal'", C.ink, 600); R(`${T.hq[k].teachers} حلقة`, mX+cw-700, y+36, "600 23px 'Tajawal'", C.soft); R(`${T.hq[k].students} طالب`, mX+cw-860, y+36, "600 23px 'Tajawal'", C.soft); y += 54; });
+    y += 14;
+    section('تفاصيل المراكز');
+    const hdr = ()=>{ ensure(56); ctx.fillStyle = C.line; ctx.fillRect(mX,y,cw,50); const hs = [['المركز',16],['الطلاب',470],['الحلقات',590],['الاختبارات',715],['الحضور',860],['الصافي',990]]; hs.forEach(h=>R(h[0], mX+cw-h[1], y+34, "800 21px 'Tajawal'", C.ink)); y += 50; };
+    hdr();
+    d.centers.forEach((c,i)=>{
+      if(y + 54 > H - 110){ newPage(false); hdr(); }
+      if(i%2===0){ ctx.fillStyle = C.cream; ctx.fillRect(mX,y,cw,54); }
+      const marked = c.att.p + c.att.a + c.att.e;
+      R(c.name + (c.archived ? ' (موقوف)' : ''), mX+cw-16, y+36, "700 23px 'Tajawal'", C.ink, 420);
+      R(String(c.students), mX+cw-470, y+36, "700 23px 'Tajawal'", C.ink);
+      R(String(c.teachers), mX+cw-590, y+36, "700 23px 'Tajawal'", C.ink);
+      R(String(c.examsMonth), mX+cw-715, y+36, "700 23px 'Tajawal'", C.ink);
+      R(marked ? Math.round(c.att.p/marked*100)+'%' : '—', mX+cw-860, y+36, "700 23px 'Tajawal'", C.ink);
+      L(fmtMoney(c.fin.net), mX+16, y+36, "800 23px 'Tajawal'", c.fin.net < 0 ? C.red : C.green);
+      y += 54;
+    });
+    pages.forEach((p,i)=>{ const c = p.getContext('2d'); c.textAlign='center'; c.direction='rtl'; c.font = "600 20px 'Tajawal'"; c.fillStyle = C.soft; c.fillText(`صفحة ${i+1} من ${pages.length}  ·  أُصدر بتاريخ ${new Date().toLocaleDateString('ar-EG',{year:'numeric',month:'long',day:'numeric'})}`, W/2, H-50); });
+    const { jsPDF } = window.jspdf; const pdf = new jsPDF({ orientation:'p', unit:'pt', format:[W,H] });
+    pages.forEach((p,i)=>{ if(i>0) pdf.addPage([W,H],'p'); pdf.addImage(p.toDataURL('image/jpeg',0.93),'JPEG',0,0,W,H); });
+    const name = `تقرير-المراكز-${d.month}.pdf`, blob = pdf.output('blob'), file = new File([blob], name, { type:'application/pdf' });
+    if(navigator.canShare && navigator.canShare({ files:[file] })) await navigator.share({ files:[file], title:'تقرير المراكز' });
+    else { superDownload(blob, name); showToast('تم حفظ التقرير كملف PDF'); }
+  }catch(e){ if(!(e && e.name === 'AbortError')){ console.error(e); showToast('تعذّر إصدار التقرير'); } }
+  finally{ btn.disabled = false; }
 }
 
 async function saveTrash(){
@@ -7787,7 +8029,7 @@ function attachStudentDetailHandlers(){
 }
 
 /* ---------------- SETTINGS VIEW ---------------- */
-const roleLabel = { admin: 'مدير', examiner: 'مختبِر', teacher: 'محفّظ', super: 'مسؤول الملف' };
+const roleLabel = { admin: 'مدير', examiner: 'مختبِر', teacher: 'محفّظ', super: 'مسؤول الملف', owner: 'مدير النظام' };
 let centerSettingsExpanded = false;
 
 
