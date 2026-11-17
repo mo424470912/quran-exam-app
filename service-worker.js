@@ -6,7 +6,7 @@
 // worker only handles the *app shell* — the HTML/CSS/JS/fonts/icons —
 // so the page itself loads even with zero connectivity.
 
-const CACHE_NAME = 'quran-exam-app-v6';
+const CACHE_NAME = 'quran-exam-app-v8';
 const APP_SHELL = [
   './',
   './index.html',
@@ -53,6 +53,30 @@ self.addEventListener('activate', (event) => {
 // since there's nothing else to show.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  // The app page itself (index.html): NETWORK-FIRST with a short timeout,
+  // so every time the app is opened with a connection it loads the newest
+  // version straight away (no second open needed); with no/poor connection
+  // it falls back to the cached copy so offline use still works.
+  const url = new URL(event.request.url);
+  if (event.request.mode === 'navigate' || (url.origin === location.origin && /\/(index\.html)?$/.test(url.pathname))) {
+    event.respondWith(
+      new Promise((resolve) => {
+        let settled = false;
+        const fallback = () => caches.match(event.request).then((c) => c || caches.match('./index.html')).then((c) => { if (!settled) { settled = true; resolve(c || Response.error()); } });
+        const timer = setTimeout(fallback, 4000);
+        fetch(event.request, { cache: 'no-cache' }).then((response) => {
+          clearTimeout(timer);
+          if (response && response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => { cache.put(event.request, copy.clone()); cache.put('./index.html', copy); }).catch(() => {});
+            if (!settled) { settled = true; resolve(response); }
+          } else fallback();
+        }).catch(() => { clearTimeout(timer); fallback(); });
+      })
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
