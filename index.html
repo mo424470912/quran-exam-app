@@ -1092,7 +1092,7 @@ function logicalKey(docKey){
   if(CENTER_ID === 'main') return docKey.includes('__') ? null : docKey;
   return docKey.startsWith(CENTER_ID + '__') ? docKey.slice(CENTER_ID.length + 2) : null;
 }
-function qdocRef(key){ return qdocRef(dk(key)); }
+function qdocRef(key){ return firestoreDb.collection('quran_app').doc(dk(key)); }
 
 const lastLocalWrite = {}; // key -> ms timestamp of the last save made on THIS device
 
