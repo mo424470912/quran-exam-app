@@ -6,7 +6,7 @@
 // worker only handles the *app shell* — the HTML/CSS/JS/fonts/icons —
 // so the page itself loads even with zero connectivity.
 
-const CACHE_NAME = 'quran-exam-app-v4';
+const CACHE_NAME = 'quran-exam-app-v5';
 const APP_SHELL = [
   './',
   './index.html',

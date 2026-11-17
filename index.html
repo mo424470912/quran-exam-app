@@ -3,6 +3,33 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
+<script>
+(function(){
+  var errs = [];
+  function panel(){
+    var app = document.getElementById('app');
+    if(!app || app.children.length) return;
+    app.innerHTML = '<div style="max-width:440px;margin:40px auto;padding:20px;font-family:Tahoma,Arial,sans-serif;direction:rtl;text-align:center;line-height:1.8;color:#1B4332;">'
+      + '<h2 style="margin:0 0 8px;">تعذّر فتح البرنامج</h2>'
+      + '<p style="font-size:14px;color:#444;">اضغط الزر لمسح الذاكرة المؤقتة وإعادة التحميل. إذا استمرت المشكلة صوّر هذه الشاشة وأرسلها للمطوّر.</p>'
+      + '<button id="__fix" style="font-size:16px;padding:12px 22px;border:0;border-radius:12px;background:#1B4332;color:#fff;">مسح الذاكرة المؤقتة وإعادة التحميل</button>'
+      + '<pre dir="ltr" style="text-align:left;font-size:11px;white-space:pre-wrap;background:#f3efe4;padding:10px;border-radius:8px;margin-top:16px;">'
+      + (navigator.userAgent + '\n' + errs.join('\n')).replace(/</g,'&lt;') + '</pre></div>';
+    document.getElementById('__fix').onclick = function(){
+      var done = function(){ location.reload(); };
+      try{
+        var jobs = [];
+        if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations) jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){ return Promise.all(rs.map(function(r){ return r.unregister(); })); }));
+        if(window.caches && caches.keys) jobs.push(caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); }));
+        Promise.all(jobs).then(done, done);
+      }catch(e){ done(); }
+    };
+  }
+  window.addEventListener('error', function(e){ errs.push((e.message||'error') + ' @' + (e.lineno||'?') + ':' + (e.colno||'?')); setTimeout(panel, 400); });
+  window.addEventListener('unhandledrejection', function(e){ errs.push('promise: ' + (e.reason && (e.reason.message || e.reason) || '?')); });
+  setTimeout(panel, 9000);
+})();
+</script>
 <meta name="author" content="محمد حسام عاشور">
 <meta name="copyright" content="©2026 محمد حسام عاشور">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
@@ -973,7 +1000,12 @@ try{
     // working (reading + saving) with no internet connection at all,
     // then syncs automatically with the server as soon as connectivity
     // returns — no action needed from the user.
-    firestoreDb.enablePersistence({ synchronizeTabs: true })
+    const isApple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    try{ firestoreDb.settings({ experimentalAutoDetectLongPolling: true, merge: true }); }catch(e){}
+    let persistP;
+    try{ persistP = isApple ? firestoreDb.enablePersistence() : firestoreDb.enablePersistence({ synchronizeTabs: true }); }
+    catch(e){ persistP = Promise.reject(e); }
+    persistP
       .catch(e => console.warn('تعذّر تفعيل وضع الأوفلاين الكامل (المتصفح لا يدعمه أو فيه أكثر من تبويب مفتوح)', e));
   } else if (firebaseConfigIsReal && !window.firebase) {
     firebaseUnreachable = true;
@@ -2421,7 +2453,7 @@ function attachFinanceHandlers(){
     if(!date){ err.textContent = 'اختر التاريخ'; return; }
     if(date > localDateStamp()){ err.textContent = 'ما بتقدر تسجّل حركة بتاريخ مستقبلي'; return; }
     const now = new Date().toISOString();
-    const editing = finEditId ? Object.values(state.finance).flat().find(r=>r.id===finEditId) : null;
+    const editing = finEditId ? Object.values(state.finance).reduce((a,x)=>a.concat(x),[]).find(r=>r.id===finEditId) : null;
     if(editing){
       // moved to another month? remove from the old one, add to the new
       const oldM = editing.d.slice(0,7), newM = date.slice(0,7);
@@ -2448,7 +2480,7 @@ function attachFinanceHandlers(){
   const cancel = document.getElementById('fin-cancel-edit'); if(cancel) cancel.onclick = ()=>{ finEditId = null; render(); };
   document.querySelectorAll('.fin-edit').forEach(b=> b.onclick = ()=>{ finEditId = b.dataset.id; render(); window.scrollTo({ top: 0, behavior:'smooth' }); });
   document.querySelectorAll('.fin-del').forEach(b=> b.onclick = async ()=>{
-    const r = Object.values(state.finance).flat().find(x=>x.id===b.dataset.id); if(!r) return;
+    const r = Object.values(state.finance).reduce((a,x)=>a.concat(x),[]).find(x=>x.id===b.dataset.id); if(!r) return;
     if(!confirm(`حذف حركة «${r.p}» بمبلغ ${fmtMoney(r.a)}؟`)) return;
     r.x = true; r.u = new Date().toISOString();
     await finSaveMonth(r.d.slice(0,7)); showToast('تم الحذف'); render();
