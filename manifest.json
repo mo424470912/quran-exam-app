@@ -2,6 +2,7 @@
   "name": "برنامج إدارة مراكز تحفيظ القرآن الكريم",
   "short_name": "مراكز التحفيظ",
   "description": "برنامج إدارة اختبارات حفظ وتلاوة القرآن الكريم — مركز السيد هاشم",
+  "id": "./index.html",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -11,8 +12,8 @@
   "dir": "rtl",
   "lang": "ar",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "logo-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

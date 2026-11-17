@@ -6,14 +6,15 @@
 // worker only handles the *app shell* — the HTML/CSS/JS/fonts/icons —
 // so the page itself loads even with zero connectivity.
 
-const CACHE_NAME = 'quran-exam-app-v8';
+const CACHE_NAME = 'quran-exam-app-v9';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './icon-512-maskable.png',
+  './logo-192.png',
+  './logo-512.png',
+  './logo-maskable-512.png',
+  './logo-apple-180.png',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js',
