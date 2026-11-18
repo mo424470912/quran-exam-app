@@ -1360,6 +1360,12 @@ async function loadAppData(){
   try{ state.schedule = sc ? JSON.parse(sc.value) : []; }catch(e){ state.schedule = []; }
   try{ state.notifications = nt ? JSON.parse(nt.value) : []; }catch(e){ state.notifications = []; }
   try{ state.memorization = mz ? JSON.parse(mz.value) : []; }catch(e){ state.memorization = []; }
+  // Students who tested / were logged by a teacher but have no explicit teacher
+  // yet get that teacher written on their file (the one used most), so the
+  // student file, memorization, attendance and halaqa counts all agree.
+  try{
+    if(backfillStudentTeachers() && state.currentRole === 'admin' && !state.superViewing) await saveStudents();
+  }catch(e){ console.warn('backfillStudentTeachers', e); }
   try{ state.importBatches = ib ? JSON.parse(ib.value) : []; }catch(e){ state.importBatches = []; }
   try{ state.centerSettings = cs ? JSON.parse(cs.value) : {}; }catch(e){ state.centerSettings = {}; }
   applyCenterOverrides();
@@ -2251,9 +2257,9 @@ function attendanceAdminCardHTML(){
   if(!attAdminDate) attAdminDate = localDateStamp();
   const date = attAdminDate, month = date.slice(0,7);
   const arr = (state.attendance[month] || []).filter(r=>r.d===date && r.s!=='x');
-  const teachers = [...new Set(state.students.map(x=>x.registeredByTeacher).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar'));
+  const teachers = [...new Set(state.students.map(x=>getStudentTeacherName(x)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar'));
   const rows = teachers.map(t=>{
-    const sts = state.students.filter(x=>x.registeredByTeacher===t);
+    const sts = state.students.filter(x=>getStudentTeacherName(x)===t);
     let p=0,a=0,e=0,u=0;
     sts.forEach(st=>{ const r = attGet(st.name, date); if(!r) u++; else if(r.s==='p') p++; else if(r.s==='a') a++; else e++; });
     return `<div class="att-trow"><b>${escapeHtml(t)}</b><span><i class="att-dot p"></i>${p} <i class="att-dot a"></i>${a} <i class="att-dot e"></i>${e} <i class="att-dot u"></i>${u}</span></div>`;
@@ -2702,7 +2708,7 @@ function halaqaPickerHTML(teacher){
 function halaqaStatsCardHTML(){
   const groups = {}; let none = { teachers:0, students:0 };
   TEACHERS.forEach(t=>{
-    const h = halaqaOf(t), n = state.students.filter(x=>x.registeredByTeacher===t).length;
+    const h = halaqaOf(t), n = state.students.filter(x=>getStudentTeacherName(x)===t).length;
     if(!h){ none.teachers++; none.students += n; return; }
     const g = groups[h.cat] = groups[h.cat] || { teachers:0, students:0, types:{} };
     g.teachers++; g.students += n;
@@ -3430,6 +3436,8 @@ function upsertStudentFromExam(record){
     student = { id: makeStudentId(), name: key, phone: '', notes: '', juzProgress: [], createdAt: new Date().toISOString() };
     state.students.push(student);
   }
+  // the teacher the student tested with becomes his teacher on the file
+  if(!student.registeredByTeacher && record.teacherName && TEACHERS.includes(record.teacherName)) student.registeredByTeacher = record.teacherName;
   if(!record.stoppedEarly && record.score >= 80){
     const nums = (String(record.juz).match(/\d+/g) || []).map(Number);
     nums.forEach(n=>{
@@ -6584,7 +6592,7 @@ function memorizationAdminView(){
     const pages = Math.round([...names].reduce((sum,n)=> sum + getMonthlyNewPageCount(n, ym, t), 0) * 10) / 10;
     const lastT = sess.reduce((mx,m)=> Math.max(mx, new Date(m.date).getTime()), 0);
     const days = lastT ? Math.floor((now - lastT)/86400000) : null;
-    return { t, sessions: monthSess.length, students: state.students.filter(x=>x.registeredByTeacher===t).length, pages, days };
+    return { t, sessions: monthSess.length, students: state.students.filter(x=>getStudentTeacherName(x)===t).length, pages, days };
   });
   const recent = state.memorization.slice().sort((a,b)=> new Date(b.date)-new Date(a.date)).slice(0,15);
   return `
@@ -6888,6 +6896,15 @@ let expandedTeacherGroups = new Set();
 /* Best-effort "which teacher does this student belong to" — explicit
    registration wins, otherwise inferred from whoever has tested or
    logged memorization sessions for them most. */
+function backfillStudentTeachers(){
+  let changed = false;
+  state.students.forEach(st=>{
+    if(st.registeredByTeacher) return;
+    const t = getStudentTeacherName(st);
+    if(t && TEACHERS.includes(t)){ st.registeredByTeacher = t; changed = true; }
+  });
+  return changed;
+}
 function getStudentTeacherName(student){
   if(student.registeredByTeacher) return student.registeredByTeacher;
   const counts = {};
@@ -8046,10 +8063,10 @@ function studentDetailView(){
   <div class="field">
     <label>المحفّظ المسؤول</label>
     <select id="student-teacher-assign">
-      <option value="">تلقائي (حسب سجل الاختبارات/التحفيظ)</option>
-      ${TEACHERS.map(n=>`<option value="${escapeHtml(n)}" ${student.registeredByTeacher===n?'selected':''}>${escapeHtml(n)}</option>`).join('')}
+      <option value="">غير محدد</option>
+      ${(()=>{ const cur = student.registeredByTeacher || getStudentTeacherName(student) || ''; return TEACHERS.map(n=>`<option value="${escapeHtml(n)}" ${cur===n?'selected':''}>${escapeHtml(n)}</option>`).join(''); })()}
     </select>
-    <p style="font-size:11px; color:var(--ink-soft); margin-top:5px;">استخدمها لو الطالب مش ظاهر بمجموعة محفّظه الصح بصفحة الطلاب.</p>
+    <p style="font-size:11px; color:var(--ink-soft); margin-top:5px;">المحفّظ هنا هو اللي اختبره أو سجّل له تحفيظ، وتقدر تغيّره.</p>
   </div>
   <div class="field">
     <label>رقم الهوية (اختياري)</label>
